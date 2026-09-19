@@ -10,6 +10,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.util.Filepath;
 import net.runelite.client.util.LinkBrowser;
 
 /**
@@ -40,7 +41,7 @@ public final class MccrFileRecorder implements Recorder
 
 	private final Object lock = new Object();
 	private final Gson gson;
-	private final Path directory;
+	private final Filepath directory;
 	/** Read when the file opens, not when the recorder is made: the character's name is not known until the first tick. */
 	private final java.util.function.Supplier<String> stem;
 	/** The memory so far, bounded by the capture's budgets and the size cap below. */
@@ -48,18 +49,18 @@ public final class MccrFileRecorder implements Recorder
 	private static final int MAX_HELD_CHARS = 64 * 1024 * 1024;
 	/** The stem the file opened with; the supplier's answer at that moment. */
 	private String name = "";
-	private Path partial;
-	private Path sealed;
+	private Filepath partial;
+	private Filepath sealed;
 	private State state = State.IDLE;
 	private String error = "";
 	private long lines;
 
-	public MccrFileRecorder(Gson gson, Path directory, String stem)
+	public MccrFileRecorder(Gson gson, Filepath directory, String stem)
 	{
 		this(gson, directory, () -> stem);
 	}
 
-	public MccrFileRecorder(Gson gson, Path directory, java.util.function.Supplier<String> stem)
+	public MccrFileRecorder(Gson gson, Filepath directory, java.util.function.Supplier<String> stem)
 	{
 		this.gson = gson;
 		this.directory = directory;
@@ -91,7 +92,7 @@ public final class MccrFileRecorder implements Recorder
 	}
 
 	/** The sealed file once it exists, else the one being written. */
-	public Path path()
+	public Filepath path()
 	{
 		synchronized (lock)
 		{
@@ -103,7 +104,7 @@ public final class MccrFileRecorder implements Recorder
 	@Override
 	public String destination()
 	{
-		Path at = path();
+		Filepath at = path();
 		return at == null ? "" : "Will be saved as " + at;
 	}
 
@@ -120,10 +121,10 @@ public final class MccrFileRecorder implements Recorder
 			{
 				// The folder is made now so a problem with it is known at the start,
 				// not at the end; the file itself waits for the seal.
-				Files.createDirectories(directory);
+				directory.createDirectories();
 				name = stem.get();
-				partial = directory.resolve(name + PARTIAL);
-				sealed = directory.resolve(name + SEALED);
+				partial = directory.joinSegment(name + PARTIAL);
+				sealed = directory.joinSegment(name + SEALED);
 				held.setLength(0);
 				held.append(gson.toJson(header)).append('\n');
 				lines = 1;
@@ -184,9 +185,10 @@ public final class MccrFileRecorder implements Recorder
 			state = State.FINISHING;
 			try
 			{
-				Files.write(partial, held.toString().getBytes(StandardCharsets.UTF_8),
+				// Every byte through RuneLite's own path utility, as the Plugin Hub asks.
+				partial.write(held.toString().getBytes(StandardCharsets.UTF_8),
 					StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-				Files.move(partial, sealed, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+				partial.moveTo(sealed, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 				held.setLength(0);
 				state = State.COMPLETE;
 				log.debug("sealed memory {} ({} lines)", sealed, lines);
@@ -200,11 +202,11 @@ public final class MccrFileRecorder implements Recorder
 	}
 
 	/** Show the folder the memories are in. The client's own opener: the Hub does not accept java.awt.Desktop. */
-	public static void showFolder(Path directory)
+	public static void showFolder(Filepath directory)
 	{
 		try
 		{
-			Files.createDirectories(directory);
+			directory.createDirectories();
 		}
 		catch (IOException ignored)
 		{
@@ -217,8 +219,8 @@ public final class MccrFileRecorder implements Recorder
 	@Override
 	public CompletableFuture<Void> openStudio()
 	{
-		Path at = path();
-		if (at == null || !Files.exists(at))
+		Filepath at = path();
+		if (at == null || !at.exists())
 		{
 			CompletableFuture<Void> missing = new CompletableFuture<>();
 			missing.completeExceptionally(new IOException("The recording file is not there yet."));

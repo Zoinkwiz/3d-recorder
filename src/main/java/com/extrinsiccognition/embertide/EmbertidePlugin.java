@@ -61,7 +61,12 @@ import net.runelite.client.util.Text;
 	// holding a recording needs to know where it goes.
 	name = "3D Replay Recorder",
 	description = "Records your session as a 3D replay you can fly a camera through and cut into clips at embertide.gg. Nothing leaves your machine; other players appear as unnamed figures.",
-	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide"}
+	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide"},
+	// The Plugin Hub's name for the plugin, which its data folder is named by:
+	// ~/.runelite/plugin-data/embertide. Files from before sit in
+	// ~/.runelite/embertide and RuneLite moves them across on first use.
+	internalName = "embertide",
+	legacyDataDirectory = "embertide"
 )
 public class EmbertidePlugin extends Plugin
 {
@@ -431,7 +436,14 @@ public class EmbertidePlugin extends Plugin
 	/** Panel action: show the folder the memories are in. */
 	void showFolder()
 	{
-		MccrFileRecorder.showFolder(recordingFolder());
+		try
+		{
+			MccrFileRecorder.showFolder(recordingFolder());
+		}
+		catch (java.io.IOException e)
+		{
+			notice = "Could not open the folder: " + rootMessage(e);
+		}
 	}
 
 	/** Panel action: begin a memory now, whatever the login setting says. */
@@ -493,10 +505,13 @@ public class EmbertidePlugin extends Plugin
 		return new PanelState(text.toString(), name, files, !busy, !busy);
 	}
 
-	/** Where file recordings go: RuneLite's own folder, so it is found where every other plugin's files are. */
-	static java.nio.file.Path recordingFolder()
+	/**
+	 * Where file recordings go: the plugin's own data folder, handed out by
+	 * RuneLite so every plugin's files sit where the client expects them.
+	 */
+	net.runelite.client.util.Filepath recordingFolder() throws java.io.IOException
 	{
-		return net.runelite.client.RuneLite.RUNELITE_DIR.toPath().resolve("embertide");
+		return getPluginDirectory();
 	}
 
 	/** A file name a person can read on a shelf: the game, the day and minute, and who. */
@@ -532,7 +547,18 @@ public class EmbertidePlugin extends Plugin
 		// The name is read when the file opens, on the first tick with a scene:
 		// at login the character's name is not known yet, and a file named
 		// without it is one nobody can tell apart on a shelf.
-		Recorder recorder = new MccrFileRecorder(gson, recordingFolder(), () ->
+		net.runelite.client.util.Filepath folder;
+		try
+		{
+			folder = recordingFolder();
+		}
+		catch (java.io.IOException e)
+		{
+			notice = "Could not open the recording folder: " + rootMessage(e);
+			log.debug("plugin folder unavailable", e);
+			return;
+		}
+		Recorder recorder = new MccrFileRecorder(gson, folder, () ->
 		{
 			Player who = client.getLocalPlayer();
 			return fileStem(who == null ? null : who.getName());

@@ -29,7 +29,9 @@ repositories {
 	mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
+// The Filepath utility the Plugin Hub now requires is in 1.12.39; back to
+// latest.release once that is the release.
+def runeLiteVersion = '1.12.39-SNAPSHOT'
 def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
 
 dependencies {

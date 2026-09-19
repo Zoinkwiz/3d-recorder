@@ -1,28 +1,11 @@
-# 3D Replay Recorder for Old School RuneScape
+# 3D Replay Recorder, by Embertide, for Old School RuneScape
 
-A RuneLite plugin that turns a play session into a local **Embertide
+A RuneLite plugin (listed on the Plugin Hub as **3D Replay Recorder**) that turns a play session into a local **Embertide
 recording**: where you stood, who was near you, what the ground and the
 objects around you looked like, and what appeared or vanished while you were there.
-It writes a file in RuneLite's own folder. 
-
-
-Open it at [embertide.gg/studio](https://embertide.gg/studio/) in your browser, with no account and nothing to install, or in the Embertide app, and cut clips of your play from any angle, in any look.
-
-View your recordings:
-
-<img width="1134" height="657" alt="Screenshot 2026-09-16 at 00 12 44" src="https://github.com/user-attachments/assets/5ab217b1-012d-44ad-8e63-86f171ed3f25" />
-
-Change the lighting:
-
-<img width="1128" height="570" alt="Screenshot 2026-09-16 at 00 13 11" src="https://github.com/user-attachments/assets/c9a123aa-4b4a-4531-b6f3-8b5fc7671214" />
-
-Change the renderer:
-
-<img width="1128" height="646" alt="Screenshot 2026-09-16 at 00 14 03" src="https://github.com/user-attachments/assets/0d2663d5-b48f-4237-8e62-e01580531c6c" />
-
-Change your angle of the same scene:
-
-<img width="1128" height="650" alt="Screenshot 2026-09-16 at 00 15 01" src="https://github.com/user-attachments/assets/9345dea7-343d-4069-8482-b7407606533c" />
+It writes a file in RuneLite's own folder. The Embertide app on the same
+computer reads that folder; [embertide.gg/studio](https://embertide.gg/studio/)
+takes the file dragged in, with no account and no app.
 
 **Nothing leaves the machine, and the plugin opens no connection to
 anything.** It never automates play and never reads inventories or account
@@ -61,23 +44,21 @@ streams, so the app's recorder and the Studio importer needed no new format.
 
 ### The OSRS layer, for rendering from the cache
 
-The generic records above describe the world as blocks, which any Embertide
-viewer can draw. On top of them the recording keeps a second set of records,
-profile `ec.mccr.osrs/4`, that hold the game's own ids: which map regions
-were loaded, which object stood on which tile, what each player wore, and
-what animation each figure was in. A viewer that has the player's game cache
-on the same machine can look those ids up and draw the real models from any
-angle. A viewer without the cache ignores these records; the app stores them
-unchanged. The file header records the cache revision, so the file can still
-be drawn against the right version of the game after an update.
+Alongside the generic cells, every recording carries the `ec.mccr.osrs/1`
+layer: what a renderer holding the player's own game cache needs to rebuild
+the scene exactly, from any angle, with the real models. The app's store
+passes these records through untouched; a viewer that does not know them
+keeps them as evidence. The header's `osrs` block names the cache revision,
+so a recording can be rendered against the cache it was recorded on, even
+after the game updates.
 
 | Record | Content |
 | --- | --- |
 | `osrs.region` | On each scene load: the loaded map regions, the scene base, the plane, and whether it is an instance. The static world is the cache's own map at that revision; recorded objects override it where they differ. |
 | `osrs.object` | Baseline objects within the capture radius, and every spawn or despawn: object id, kind (game, wall, ground, decorative), packed type and orientation from the object config, the varbit-selected impostor id when there is one, and the anchor tile of a multi-tile object. |
 | `osrs.appearance` | A player's equipment ids, colours and gender, once and again whenever they change. |
-| `osrs.poses` | Once per game tick, one entry for every figure the client draws, nearest first: `[id, x, y, plane, height, orientation, animation, pose animation, frame, graphic, npc id or -1, graphic height, client slot]`. The world tile, the ground height the client placed it at, the animation it was in and the effect over its head. |
-| `osrs.motion` | On the 20 ms client tick, for you and every tracked figure within the radius: `[id, x, y, plane, orientation, animation, frame, pose animation]` with x and y in fractional tiles, written only when something changed. A run across two tiles with a turn halfway is here; the game tick alone cannot carry it. Bounded at 600,000 samples per recording. |
+| `player.position` `osrs` field | On every pose: world tile, NPC id, current orientation, animation, pose animation, animation frame and spot graphic. |
+| `osrs.motion` | On the 20 ms client tick, for you and every tracked actor within the radius: the state the screen showed, as `[id, x, y, plane, orientation, animation, frame, pose animation]` with x and y in fractional tiles, emitted only when something changed. A run across two tiles with a turn halfway is here; the game tick alone cannot carry it. Bounded at 60,000 samples per recording. |
 
 Coordinates map a world tile `(x, y, plane)` to the cell
 `(x, plane * 8 + elevation, -y)`, declared in every header as
@@ -109,10 +90,11 @@ shows the caveat.
 
 ## Where the file goes
 
-Every recording is a file in RuneLite's own folder, beside every other plugin's
-files:
+Every recording is a file in the plugin's own data folder, handed out by
+RuneLite (files from builds before the Plugin Hub's file rules sat in
+`~/.runelite/embertide`; RuneLite moves them across on first use):
 
-- `~/.runelite/embertide/osrs-<date>-<time>-<name>.embertide` (`<name>` is your
+- `~/.runelite/plugin-data/embertide/osrs-<date>-<time>-<name>.embertide` (`<name>` is your
   own character's), written when **Stop recording**, the minutes-per-file split, logging out
   or closing the client seals the recording. The write goes through
   `.embertide.partial` and an atomic rename, so a reader never sees half a
