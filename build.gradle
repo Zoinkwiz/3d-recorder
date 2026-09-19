@@ -1,0 +1,79 @@
+plugins {
+	id 'java'
+}
+
+// JDK 11 IS SELECTED, NOT INHERITED. Without this the compiler and the `run`
+// task use whatever JDK happens to be on JAVA_HOME, so the build is a
+// different build on each machine and the failure when that JDK is wrong
+// arrives as a class file major version number rather than a sentence.
+//
+// This does NOT decide which JDK runs Gradle itself. Gradle 8.10 supports up
+// to Java 23 and refuses to start on anything newer, with
+// "Unsupported class file major version" and no mention of Gradle or of a
+// version anyone recognises (69 is Java 25). That one is JAVA_HOME's job, and
+// the README says so under Developing.
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(11)
+	}
+}
+
+repositories {
+	mavenLocal()
+	maven {
+		url = 'https://repo.runelite.net'
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
+	mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
+
+dependencies {
+	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+}
+
+group = 'com.extrinsiccognition'
+version = '0.2.0'
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release.set(11)
+}
+
+// Developer-mode RuneLite with this plugin loaded, no Plugin Hub needed.
+tasks.register('run', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = pluginMainClass
+
+	// A JavaExec task keeps the JDK that runs Gradle unless it is told
+	// otherwise: the toolchain above covers compilation and tests, not this.
+	// Saying it here is what makes the client run on 11 too.
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+
+	jvmArgs "-ea"
+
+	// macOS full screen, on a JDK newer than 11.
+	//
+	// RuneLite's OSXFullScreenAdapter extends com.apple.eawt.FullScreenAdapter,
+	// and java.desktop has never exported com.apple.eawt. Up to Java 15 the
+	// default --illegal-access=permit opened it anyway, so this ran; Java 16 made
+	// the default deny and Java 17 removed the switch, so defining that class
+	// throws IllegalAccessError and the client dies during ClientUI.init with
+	// "Failure during startup" and no mention of a Java version. Anyone whose
+	// JAVA_HOME is current hits it; anyone on 11 never does, which is why it can
+	// sit here working for one person and failing for the next.
+	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+		jvmArgs "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
+	}
+
+	args "--developer-mode", "--debug"
+}

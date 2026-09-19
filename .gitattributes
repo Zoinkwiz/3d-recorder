@@ -1,0 +1,90 @@
+# EC shared text policy. Every managed repository tracks its own copy.
+# Repository-specific overrides belong after this shared base block.
+* text=auto eol=lf
+
+# Windows command scripts are the only text files kept as CRLF by default.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Keep common binary formats out of Git's text and diff heuristics.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.gz binary
+*.tar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.mp4 binary
+*.mov binary
+*.exe binary
+*.dll binary
+*.pdb binary
+*.lib binary
+*.a binary
+*.so binary
+*.dylib binary
+*.bin binary
+*.onnx binary
+*.pt binary
+*.pth binary
+*.ckpt binary
+*.safetensors binary
+*.npy binary
+*.npz binary
+*.parquet binary
+*.pkl binary
+*.pickle binary
+*.glb binary
+*.ply binary
+*.splat binary
+*.fbx binary
+*.blend binary
+*.wasm binary
+*.node binary
+*.jar binary
+*.class binary
+*.webm binary
+*.avi binary
+*.mkv binary
+*.ogg binary
+*.flac binary
+*.bmp binary
+*.tiff binary
+*.heic binary
+*.avif binary
+*.psd binary
+*.tgz binary
+*.bz2 binary
+*.xz binary
+*.zst binary
+*.rar binary
+*.p12 binary
+*.pfx binary
+*.der binary
+*.keystore binary
+*.sqlite binary
+*.db binary
+*.reg -text
+
+# Markdown uses two trailing spaces as a hard line break; .editorconfig
+# already exempts *.md from trailing-whitespace trimming, so keep
+# `git diff --check` consistent with that policy.
+*.md whitespace=-blank-at-eol
+
+# Office documents are binary containers (zipped XML). Without this, the text
+# hygiene gate reads their NUL bytes and fails, and git would try to normalise
+# line endings inside the archive and corrupt it.
+*.pptx binary
+*.docx binary
+*.xlsx binary
