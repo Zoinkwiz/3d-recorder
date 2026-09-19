@@ -1,0 +1,57 @@
+plugins {
+	id 'java'
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(11)
+	}
+}
+
+repositories {
+	mavenLocal()
+	maven {
+		url = 'https://repo.runelite.net'
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
+	mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
+
+dependencies {
+	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+}
+
+group = 'com.extrinsiccognition'
+version = '0.2.0'
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release.set(11)
+}
+
+tasks.register('run', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = pluginMainClass
+
+	// JavaExec must explicitly use the selected toolchain.
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+
+	jvmArgs "-ea"
+
+	// RuneLite's macOS fullscreen adapter requires access to com.apple.eawt.
+	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+		jvmArgs "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
+	}
+
+	args "--developer-mode", "--debug"
+}
