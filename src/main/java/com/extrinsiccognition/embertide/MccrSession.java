@@ -11,7 +11,7 @@ public final class MccrSession
 	public static final String FORMAT = "mccr/0.1";
 	public static final String PROFILE = "ec.mccr.spatial/1";
 	public static final String SOURCE = "osrs.runelite";
-	public static final String RECORDER = "embertide-runelite/0.1.0";
+	public static final String RECORDER = "embertide-runelite/0.2.1";
 	public static final String GAME = "osrs";
 
 	public final String id;
@@ -20,6 +20,7 @@ public final class MccrSession
 	private long startedNanos;
 	private final double maxSeconds;
 	private int serial;
+	private double lastRecordTime;
 
 	public MccrSession(String dimension, double maxSeconds)
 	{
@@ -60,6 +61,10 @@ public final class MccrSession
 
 	public JsonObject record(String type, double t, JsonObject payload, String user)
 	{
+		// Registering a newly observed event actor can emit rows inside a callback
+		// that already sampled its time. Keep file order monotonic for the importer.
+		t = Math.max(lastRecordTime, Math.max(0, Math.min(maxSeconds, t)));
+		lastRecordTime = t;
 		JsonObject row = new JsonObject();
 		row.addProperty("id", id + ":r" + (++serial));
 		row.addProperty("ts", capturedAt.plusNanos((long) (t * 1_000_000_000L)).toString());

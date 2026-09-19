@@ -26,7 +26,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "trackNpcs",
 		name = "Record nearby NPCs",
-		description = "Record where NPCs stand. Names come from the game cache; nothing else is kept.",
+		description = "Record nearby NPCs' positions, appearance, combat and optional overhead speech. Turning this off excludes NPCs from all recording channels.",
 		position = 2
 	)
 	default boolean trackNpcs()
@@ -37,7 +37,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "trackPlayers",
 		name = "Record nearby players",
-		description = "Record where other players stand and what they wear, as unnamed figures, so the recording shows who was there. Their names and their chat are never recorded.",
+		description = "Record nearby players' positions, appearance and combat as unnamed figures. Turning this off excludes them from all channels. Their names and chat are never recorded.",
 		position = 3
 	)
 	default boolean trackPlayers()
@@ -52,6 +52,17 @@ public interface EmbertideConfig extends Config
 		position = 4
 	)
 	default boolean recordOverheadText()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "recordOwnChat",
+		name = "Record your public chat",
+		description = "Include your own public chat in the saved replay. Private, clan, friends and other players' chat are never recorded.",
+		position = 8
+	)
+	default boolean recordOwnChat()
 	{
 		return true;
 	}
@@ -82,7 +93,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
-		description = "When you log out, show the recording's file and open embertide.gg/studio to drag it into.",
+		description = "After saving on logout, open embertide.gg/studio. Use Recording folder path to find the file to drag in.",
 		position = 6
 	)
 	default boolean openStudioOnLogout()

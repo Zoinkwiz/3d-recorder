@@ -25,7 +25,9 @@ public final class EmbertidePanel extends PluginPanel
 	private final JTextArea status = new JTextArea();
 	private final JPanel files = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
-	private final JButton folder = new JButton("Show the folder");
+	private final JButton folder = new JButton("Recording folder path");
+	private final JButton retry = new JButton("Retry saving");
+	private final JButton discard = new JButton("Discard unsaved recording");
 	private final Timer refresh;
 	private boolean recording;
 	private String drawn = "";
@@ -88,7 +90,7 @@ public final class EmbertidePanel extends PluginPanel
 		middle.add(Box.createVerticalGlue());
 		add(middle, BorderLayout.CENTER);
 
-		JPanel actions = new JPanel(new GridLayout(2, 1, 0, 6));
+		JPanel actions = new JPanel(new GridLayout(0, 1, 0, 6));
 		actions.setOpaque(false);
 		toggle.addActionListener(e -> {
 			if (recording)
@@ -100,9 +102,28 @@ public final class EmbertidePanel extends PluginPanel
 				plugin.startRecording();
 			}
 		});
-		folder.addActionListener(e -> plugin.showFolder());
-		folder.setToolTipText("Open the folder the files are in.");
+		folder.addActionListener(e -> {
+			JTextArea path = new JTextArea(plugin.folderPath());
+			path.setEditable(false);
+			path.setLineWrap(true);
+			path.setColumns(40);
+			path.setRows(3);
+			path.selectAll();
+			javax.swing.JOptionPane.showMessageDialog(this, path, "Copy this path into your file manager", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+		});
+		folder.setToolTipText("Show a selectable path to the folder containing your saved recordings.");
+		retry.addActionListener(e -> plugin.retrySave());
+		discard.addActionListener(e -> {
+			if (javax.swing.JOptionPane.showConfirmDialog(this,
+				"Discard the unsaved recording? This cannot be undone.", "Discard recording",
+				javax.swing.JOptionPane.YES_NO_OPTION) == javax.swing.JOptionPane.YES_OPTION)
+			{
+				plugin.discardSave();
+			}
+		});
 		actions.add(toggle);
+		actions.add(retry);
+		actions.add(discard);
 		actions.add(folder);
 		add(actions, BorderLayout.SOUTH);
 
@@ -118,6 +139,8 @@ public final class EmbertidePanel extends PluginPanel
 		recording = state.recording;
 		toggle.setText(recording ? "Stop recording" : "Start recording");
 		toggle.setEnabled(state.canToggle);
+		retry.setVisible(plugin.canRecover());
+		discard.setVisible(plugin.canRecover());
 		drawFiles(state.current, state.saved);
 	}
 

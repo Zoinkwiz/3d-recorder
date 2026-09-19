@@ -3,215 +3,209 @@ package com.extrinsiccognition.embertide;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.io.BufferedOutputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import lombok.extern.slf4j.Slf4j;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
+import net.runelite.client.util.Filepath;
 import net.runelite.client.util.LinkBrowser;
 
-@Slf4j
 public final class MccrFileRecorder implements Recorder
 {
 	public static final String STUDIO_URL = "https://embertide.gg/studio/";
-	private static final String PARTIAL = ".embertide.partial";
-	private static final String SEALED = ".embertide";
-
-	private final Object lock = new Object();
+	// The desktop's 64 MiB archive also includes ingest checkpoints and links.
+	static final int MAX_BYTES = 60 * 1024 * 1024;
+	static final int END_RESERVE = 16 * 1024;
+	// The desktop importer accepts 120,000 records plus a header.
+	static final int MAX_RECORDS = 120_000;
 	private final Gson gson;
-	private final Path directory;
-	private final java.util.function.Supplier<String> stem;
-	private final StringBuilder held = new StringBuilder();
-	private static final int MAX_HELD_CHARS = 64 * 1024 * 1024;
+	private final Filepath directory;
+	private final Supplier<String> stem;
+	private final Executor worker;
+	private final int capacity;
+	private final String unique = UUID.randomUUID().toString();
+	private final List<byte[]> held = new ArrayList<>();
+	private Filepath sealed;
 	private String name = "";
-	private Path partial;
-	private Path sealed;
 	private State state = State.IDLE;
 	private String error = "";
-	private long lines;
+	private int bytes;
+	private boolean full;
+	private CompletableFuture<Void> saving;
 
-	public MccrFileRecorder(Gson gson, Path directory, String stem)
+	public MccrFileRecorder(Gson gson, Filepath directory, Supplier<String> stem, Executor worker)
 	{
-		this(gson, directory, () -> stem);
+		this(gson, directory, stem, worker, MAX_BYTES);
 	}
 
-	public MccrFileRecorder(Gson gson, Path directory, java.util.function.Supplier<String> stem)
+	MccrFileRecorder(Gson gson, Filepath directory, Supplier<String> stem, Executor worker, int capacity)
 	{
 		this.gson = gson;
 		this.directory = directory;
 		this.stem = stem;
+		this.worker = worker;
+		this.capacity = capacity;
 	}
 
 	@Override
-	public State state()
+	public synchronized State state() { return state; }
+
+	@Override
+	public synchronized String error() { return error; }
+
+	@Override
+	public synchronized String captureId() { return name.isEmpty() ? unique : name; }
+
+	public synchronized Filepath path() { return sealed; }
+
+	@Override
+	public synchronized String destination()
 	{
-		synchronized (lock)
+		return sealed == null ? "" : "Will be saved as " + sealed;
+	}
+
+	@Override
+	public synchronized boolean full() { return full; }
+
+	synchronized int retainedBytes() { return bytes; }
+
+	@Override
+	public synchronized CompletableFuture<Void> open(JsonObject header)
+	{
+		if (state != State.IDLE)
 		{
-			return state;
+			return CompletableFuture.failedFuture(new IllegalStateException("Recording already opened."));
 		}
-	}
-
-	@Override
-	public String error()
-	{
-		synchronized (lock)
+		// The supplier may read the local player's name: this stays on the client thread.
+		name = stem.get() + "-" + unique;
+		sealed = directory.joinSegment(name + ".embertide");
+		state = State.READY;
+		if (!enqueue(header, false))
 		{
-			return error;
+			state = State.FAILED;
+			error = "The recording header exceeds the size budget.";
+			return CompletableFuture.failedFuture(new IOException(error));
 		}
+		return CompletableFuture.completedFuture(null);
 	}
 
 	@Override
-	public String captureId()
+	public synchronized boolean enqueue(JsonObject record, boolean control)
 	{
-		return name.isEmpty() ? stem.get() : name;
-	}
-
-	public Path path()
-	{
-		synchronized (lock)
+		if (state != State.READY || (full && !control))
 		{
-			return sealed;
+			return false;
 		}
-	}
-
-	@Override
-	public String destination()
-	{
-		Path at = path();
-		return at == null ? "" : "Will be saved as " + at;
-	}
-
-	@Override
-	public CompletableFuture<Void> open(JsonObject header)
-	{
-		synchronized (lock)
+		byte[] row = (gson.toJson(record) + '\n').getBytes(StandardCharsets.UTF_8);
+		if (bytes + row.length > capacity - (control ? 0 : END_RESERVE)
+			|| held.size() >= MAX_RECORDS + (control ? 1 : 0))
 		{
-			if (state != State.IDLE)
-			{
-				return CompletableFuture.completedFuture(null);
-			}
-			try
-			{
-				Files.createDirectories(directory);
-				name = stem.get();
-				partial = directory.resolve(name + PARTIAL);
-				sealed = directory.resolve(name + SEALED);
-				held.setLength(0);
-				held.append(gson.toJson(header)).append('\n');
-				lines = 1;
-				state = State.READY;
-				return CompletableFuture.completedFuture(null);
-			}
-			catch (IOException e)
-			{
-				return fail("Could not prepare the recording folder: " + e.getMessage());
-			}
+			full = true;
+			return false;
 		}
+		held.add(row);
+		bytes += row.length;
+		return true;
 	}
 
 	@Override
-	public boolean enqueue(JsonObject record, boolean control)
-	{
-		synchronized (lock)
-		{
-			if (state != State.READY)
-			{
-				return false;
-			}
-			String line = gson.toJson(record);
-			if (held.length() + line.length() + 1 > MAX_HELD_CHARS)
-			{
-				fail("The recording grew past the size a file may be.");
-				return false;
-			}
-			held.append(line).append('\n');
-			lines++;
-			return true;
-		}
-	}
+	public CompletableFuture<Void> flush() { return CompletableFuture.completedFuture(null); }
 
 	@Override
-	public CompletableFuture<Void> flush()
+	public synchronized CompletableFuture<Void> finish()
 	{
-		synchronized (lock)
+		if (state == State.COMPLETE || state == State.IDLE)
 		{
-			return state == State.FAILED ? failed() : CompletableFuture.completedFuture(null);
+			return CompletableFuture.completedFuture(null);
 		}
-	}
-
-	@Override
-	public CompletableFuture<Void> finish()
-	{
-		synchronized (lock)
+		if (state == State.FINISHING)
 		{
-			if (state == State.COMPLETE)
-			{
-				return CompletableFuture.completedFuture(null);
-			}
-			if (state != State.READY)
-			{
-				return failed();
-			}
-			state = State.FINISHING;
-			try
-			{
-				Files.write(partial, held.toString().getBytes(StandardCharsets.UTF_8),
-					StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-				Files.move(partial, sealed, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-				held.setLength(0);
-				state = State.COMPLETE;
-				log.debug("sealed memory {} ({} lines)", sealed, lines);
-				return CompletableFuture.completedFuture(null);
-			}
-			catch (IOException e)
-			{
-				return fail("Could not seal the recording file: " + e.getMessage());
-			}
+			return saving;
 		}
-	}
-
-	public static void showFolder(Path directory)
-	{
+		state = State.FINISHING;
+		error = "";
+		saving = new CompletableFuture<>();
 		try
 		{
-			Files.createDirectories(directory);
+			worker.execute(this::write);
 		}
-		catch (IOException ignored)
+		catch (RuntimeException e)
 		{
+			failed(e);
 		}
-		LinkBrowser.open(directory.toString());
+		return saving;
+	}
+
+	private void write()
+	{
+		Filepath partial = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
+		boolean owned = false;
+		try
+		{
+			directory.createDirectories();
+			try (OutputStream out = new BufferedOutputStream(
+				partial.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024))
+			{
+				owned = true;
+				for (byte[] row : held)
+				{
+					out.write(row);
+				}
+			}
+			// Same-directory rename without REPLACE_EXISTING. ATOMIC_MOVE can silently
+			// replace its destination on some platforms, so do not request that option.
+			partial.moveTo(sealed);
+			synchronized (this)
+			{
+				held.clear();
+				bytes = 0;
+				state = State.COMPLETE;
+			}
+			saving.complete(null);
+		}
+		catch (IOException | RuntimeException e)
+		{
+			if (owned)
+			{
+				try { partial.deleteIfExists(); }
+				catch (IOException | RuntimeException cleanup) { e.addSuppressed(cleanup); }
+			}
+			failed(e);
+		}
+	}
+
+	private synchronized void failed(Exception e)
+	{
+		state = State.FAILED;
+		error = "Could not save the recording: " + e.getMessage();
+		saving.completeExceptionally(e);
+	}
+
+	public synchronized void discard()
+	{
+		if (state != State.FAILED)
+		{
+			throw new IllegalStateException("Only a failed save can be discarded.");
+		}
+		held.clear();
+		bytes = 0;
+		state = State.COMPLETE;
 	}
 
 	@Override
 	public CompletableFuture<Void> openStudio()
 	{
-		Path at = path();
-		if (at == null || !Files.exists(at))
+		if (state() != State.COMPLETE)
 		{
-			CompletableFuture<Void> missing = new CompletableFuture<>();
-			missing.completeExceptionally(new IOException("The recording file is not there yet."));
-			return missing;
+			return CompletableFuture.failedFuture(new IOException("Save the recording before opening Studio."));
 		}
-		LinkBrowser.open(at.getParent().toString());
-		LinkBrowser.browse(STUDIO_URL);
+		javax.swing.SwingUtilities.invokeLater(() -> LinkBrowser.browse(STUDIO_URL));
 		return CompletableFuture.completedFuture(null);
-	}
-
-
-	private CompletableFuture<Void> fail(String message)
-	{
-		state = State.FAILED;
-		error = message;
-		held.setLength(0);
-		return failed();
-	}
-
-	private CompletableFuture<Void> failed()
-	{
-		CompletableFuture<Void> future = new CompletableFuture<>();
-		future.completeExceptionally(new IOException(error.isEmpty() ? "Recording failed." : error));
-		return future;
 	}
 }

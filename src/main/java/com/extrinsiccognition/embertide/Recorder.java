@@ -21,6 +21,8 @@ public interface Recorder
 	/** Return false when admission fails; the caller must stop adding observations. */
 	boolean enqueue(JsonObject record, boolean control);
 
+	default boolean full() { return false; }
+
 	CompletableFuture<Void> flush();
 
 	CompletableFuture<Void> finish();

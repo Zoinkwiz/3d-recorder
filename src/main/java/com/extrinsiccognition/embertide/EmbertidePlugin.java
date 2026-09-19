@@ -45,6 +45,8 @@ import net.runelite.client.util.Text;
 @Slf4j
 @PluginDescriptor(
 	name = "3D Replay Recorder",
+	internalName = "embertide",
+	legacyDataDirectory = "embertide",
 	description = "Records your session as a 3D replay you can fly a camera through and cut into clips at embertide.gg. Nothing leaves your machine; other players appear as unnamed figures.",
 	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide"}
 )
@@ -92,13 +94,24 @@ public class EmbertidePlugin extends Plugin
 	private EmbertideConfig config;
 	@Inject
 	private Gson gson;
+	@Inject
+	private java.util.concurrent.ScheduledExecutorService executor;
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
 	private volatile OsrsCapture capture;
 	private volatile String notice = "Ready to record.";
 	private boolean rediscover = true;
-	private boolean instanced;
+	private SceneIdentity sceneIdentity;
+	private volatile net.runelite.client.util.Filepath folder;
+	private volatile boolean enabled;
+	private volatile boolean loggedIn;
+	private volatile boolean preparingFolder;
+	private volatile boolean manual;
+	private volatile boolean continuing;
+	private volatile int uiGeneration;
+	private volatile OsrsCapture pendingSave;
+	private volatile CompletableFuture<Void> save = CompletableFuture.completedFuture(null);
 	private volatile boolean handingOff;
 	/** Manual stop persists across logins until Start is pressed. */
 	private volatile boolean stopped;
@@ -116,14 +129,22 @@ public class EmbertidePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new EmbertidePanel(this);
-		navigationButton = NavigationButton.builder()
-			.tooltip("Embertide")
-			.icon(icon())
-			.priority(7)
-			.panel(panel)
-			.build();
-		clientToolbar.addNavigation(navigationButton);
+		enabled = true;
+		loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		prepareFolder();
+		int generation = ++uiGeneration;
+		javax.swing.SwingUtilities.invokeLater(() ->
+		{
+			if (!enabled || generation != uiGeneration) { return; }
+			panel = new EmbertidePanel(this);
+			navigationButton = NavigationButton.builder()
+				.tooltip("Embertide")
+				.icon(icon())
+				.priority(7)
+				.panel(panel)
+				.build();
+			clientToolbar.addNavigation(navigationButton);
+		});
 		if (client.getGameState() == GameState.LOGGED_IN)
 		{
 			clientThread.invokeLater(() -> beginCapture(true));
@@ -133,17 +154,23 @@ public class EmbertidePlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
-		clientToolbar.removeNavigation(navigationButton);
-		if (panel != null)
+		enabled = false;
+		continuing = false;
+		++uiGeneration;
+		EmbertidePanel closingPanel = panel;
+		NavigationButton closingButton = navigationButton;
+		javax.swing.SwingUtilities.invokeLater(() ->
 		{
-			panel.dispose();
-		}
-		endCapture("plugin stopped", false, true);
+			if (closingButton != null) { clientToolbar.removeNavigation(closingButton); }
+			if (closingPanel != null) { closingPanel.dispose(); }
+		});
+		clientThread.invoke(() -> endCapture("plugin stopped", false, true));
 	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
+		loggedIn = event.getGameState() == GameState.LOGGED_IN;
 		switch (event.getGameState())
 		{
 			case LOADING:
@@ -155,13 +182,14 @@ public class EmbertidePlugin extends Plugin
 				{
 					beginCapture(true);
 				}
-				else if (instanced != instanced())
+				else if (!SceneIdentity.of(client.getTopLevelWorldView()).equals(sceneIdentity))
 				{
 					endCapture("left the previous area", false, true);
 					beginCapture(true);
 				}
 				break;
 			case LOGIN_SCREEN:
+				continuing = false;
 			case HOPPING:
 			case CONNECTION_LOST:
 				endCapture("logged out", event.getGameState() == GameState.LOGIN_SCREEN && config.openStudioOnLogout(), true);
@@ -175,20 +203,28 @@ public class EmbertidePlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		loggedIn = client.getGameState() == GameState.LOGGED_IN;
 		OsrsCapture current = capture;
 		if (current == null)
 		{
-			if (!stopped && config.recordOnLogin() && client.getGameState() == GameState.LOGGED_IN)
+			if (wantsRecording())
 			{
 				beginCapture(true);
 			}
+			current = capture;
+			if (current == null) { return; }
+		}
+		if (!SceneIdentity.of(client.getTopLevelWorldView()).equals(sceneIdentity))
+		{
+			endCapture("left the previous area", false, true);
 			return;
 		}
 		if (current.exhausted())
 		{
 			endCapture(current.reason(), false, true);
 			beginCapture(true);
-			return;
+			current = capture;
+			if (current == null) { return; }
 		}
 		if (!current.recording())
 		{
@@ -203,7 +239,7 @@ public class EmbertidePlugin extends Plugin
 		gameTickNanos += spent;
 		if (opening || tookMs > 50)
 		{
-			log.info("embertide game tick took {} ms ({}; {} client ticks since the last)", tookMs, opening ? "opening" : "steady", clientTicks);
+			log.debug("embertide game tick took {} ms ({}; {} client ticks since the last)", tookMs, opening ? "opening" : "steady", clientTicks);
 		}
 		clientTicks = 0;
 		tally();
@@ -227,7 +263,7 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		OsrsCapture current = capture;
-		log.info("embertide cost over {} s: game ticks {} ms, client ticks {} ms, {}% of one core{}",
+		log.debug("embertide cost over {} s: game ticks {} ms, client ticks {} ms, {}% of one core{}",
 			wall / 1_000_000_000L, gameTickNanos / 1_000_000L, clientTickNanos / 1_000_000L,
 			(gameTickNanos + clientTickNanos) * 100L / wall,
 			current == null ? "" : "; " + current.status());
@@ -247,6 +283,30 @@ public class EmbertidePlugin extends Plugin
 			current.clientTick();
 			clientTickNanos += System.nanoTime() - began;
 		}
+	}
+
+	@Subscribe
+	public void onNpcSpawned(net.runelite.api.events.NpcSpawned event)
+	{
+		if (capture != null) { capture.actorSpawned(event.getNpc()); }
+	}
+
+	@Subscribe
+	public void onNpcDespawned(net.runelite.api.events.NpcDespawned event)
+	{
+		if (capture != null) { capture.actorDespawned(event.getNpc()); }
+	}
+
+	@Subscribe
+	public void onPlayerSpawned(net.runelite.api.events.PlayerSpawned event)
+	{
+		if (capture != null) { capture.actorSpawned(event.getPlayer()); }
+	}
+
+	@Subscribe
+	public void onPlayerDespawned(net.runelite.api.events.PlayerDespawned event)
+	{
+		if (capture != null) { capture.actorDespawned(event.getPlayer()); }
 	}
 
 	@Subscribe
@@ -303,7 +363,7 @@ public class EmbertidePlugin extends Plugin
 	{
 		OsrsCapture current = capture;
 		Player me = client.getLocalPlayer();
-		if (current == null || me == null || event.getType() != ChatMessageType.PUBLICCHAT)
+		if (current == null || me == null || !config.recordOwnChat() || event.getType() != ChatMessageType.PUBLICCHAT)
 		{
 			return;
 		}
@@ -376,21 +436,74 @@ public class EmbertidePlugin extends Plugin
 	@Subscribe
 	public void onClientShutdown(ClientShutdown event)
 	{
-		OsrsCapture current = capture;
-		if (current != null)
-		{
-			event.waitFor(endCapture("client closed", false, true));
-		}
+		enabled = false;
+		event.waitFor(endCapture("client closed", false, true));
 	}
 
-	void showFolder()
+	/** Folder migration can touch disk, so it runs on RuneLite's worker. */
+	private synchronized void prepareFolder()
 	{
-		MccrFileRecorder.showFolder(recordingFolder());
+		if (preparingFolder || folder != null) { return; }
+		preparingFolder = true;
+		notice = "Preparing the recording folder…";
+		executor.execute(() ->
+		{
+			try
+			{
+				folder = getPluginDirectory();
+				notice = "Ready to record.";
+			}
+			catch (java.io.IOException | RuntimeException e)
+			{
+				notice = "Could not prepare the recording folder: " + rootMessage(e)
+					+ "\nPress Start recording to retry.";
+			}
+			finally { preparingFolder = false; }
+		});
+	}
+
+	String folderPath()
+	{
+		return folder == null ? "The recording folder is not ready yet." : folder.toString();
+	}
+
+	boolean canRecover()
+	{
+		OsrsCapture pending = pendingSave;
+		return pending != null && pending.recorder().state() == Recorder.State.FAILED;
+	}
+
+	void retrySave()
+	{
+		clientThread.invoke(() ->
+		{
+			if (canRecover())
+			{
+				handingOff = true;
+				watchSave(pendingSave, pendingSave.recorder().finish());
+			}
+		});
+	}
+
+	void discardSave()
+	{
+		clientThread.invoke(() ->
+		{
+			if (canRecover())
+			{
+				((MccrFileRecorder) pendingSave.recorder()).discard();
+				pendingSave = null;
+				save = CompletableFuture.completedFuture(null);
+				notice = "Unsaved recording discarded.";
+			}
+		});
 	}
 
 	void startRecording()
 	{
 		stopped = false;
+		manual = true;
+		if (folder == null) { prepareFolder(); }
 		clientThread.invoke(() ->
 		{
 			if (capture == null && client.getGameState() == GameState.LOGGED_IN)
@@ -403,6 +516,8 @@ public class EmbertidePlugin extends Plugin
 	void stopRecording()
 	{
 		stopped = true;
+		manual = false;
+		continuing = false;
 		clientThread.invoke(() -> endCapture("stopped by you", false, true));
 	}
 
@@ -413,17 +528,24 @@ public class EmbertidePlugin extends Plugin
 		StringBuilder text = new StringBuilder();
 		if (current == null)
 		{
-			text.append(handingOff ? "Saving the last moments of your session…" : stopped ? "Not recording." : notice);
-			boolean in = client.getGameState() == GameState.LOGGED_IN;
+			OsrsCapture pending = pendingSave;
+			boolean recover = pending != null && pending.recorder().state() == Recorder.State.FAILED;
+			boolean resume = enabled && !stopped && (manual || continuing || config.recordOnLogin());
+			text.append(handingOff ? "Saving your recording." + (resume ? " Recording resumes after it is saved." : "")
+				: recover ? "Recording paused. The unsaved recording is still in memory.\n\n"
+					+ pending.recorder().error() + "\n\nRetry saving, or discard it. Closing RuneLite loses this unsaved recording."
+				: stopped ? "Not recording." : notice);
+			boolean in = loggedIn;
 			if (!in)
 			{
 				text.append("\n\nLog in to start recording.");
 			}
-			else if (stopped)
+			else if (stopped && pending == null)
 			{
 				text.append("\n\nWhat you played so far is kept. Press Start recording to begin a new one.");
 			}
-			return new PanelState(text.toString(), "", files, false, in && !handingOff);
+			return new PanelState(text.toString(), "", files, handingOff && resume,
+				in && !recover && (pending == null || handingOff));
 		}
 		text.append(current.status());
 		Recorder recorder = current.recorder();
@@ -442,9 +564,10 @@ public class EmbertidePlugin extends Plugin
 		return new PanelState(text.toString(), name, files, !busy, !busy);
 	}
 
-	static java.nio.file.Path recordingFolder()
+	private boolean wantsRecording()
 	{
-		return net.runelite.client.RuneLite.RUNELITE_DIR.toPath().resolve("embertide");
+		return enabled && !stopped && (manual || continuing || config.recordOnLogin())
+			&& client.getGameState() == GameState.LOGGED_IN;
 	}
 
 	static String fileStem(String playerName)
@@ -456,18 +579,15 @@ public class EmbertidePlugin extends Plugin
 
 	private void beginCapture(boolean freshBaseline)
 	{
-		if (capture != null || handingOff)
+		if (!wantsRecording() || capture != null || pendingSave != null || handingOff || folder == null)
 		{
 			return;
 		}
 		Player me = client.getLocalPlayer();
 		WorldView view = client.getTopLevelWorldView();
-		instanced = instanced();
-		String dimension = "osrs:surface";
-		if (instanced && view != null && view.getMapRegions() != null && view.getMapRegions().length > 0)
-		{
-			dimension = "osrs:instance:" + view.getMapRegions()[0];
-		}
+		if (view == null || me == null) { return; }
+		sceneIdentity = SceneIdentity.of(view);
+		String dimension = sceneIdentity.dimension();
 		if (series == null)
 		{
 			series = java.util.UUID.randomUUID().toString();
@@ -475,16 +595,17 @@ public class EmbertidePlugin extends Plugin
 			pseudonyms.clear();
 		}
 		// Resolve the filename on the first scene tick, when the character name is available.
-		Recorder recorder = new MccrFileRecorder(gson, recordingFolder(), () ->
+		Recorder recorder = new MccrFileRecorder(gson, folder, () ->
 		{
 			Player who = client.getLocalPlayer();
 			return fileStem(who == null ? null : who.getName());
-		});
+		}, executor);
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me == null ? null : me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
 		capture = next;
+		continuing = true;
 		rediscover = freshBaseline;
-		notice = "Recording to a file in RuneLite's embertide folder.";
+		notice = "Recording. The file is saved when this part ends.";
 		next.start().whenComplete((ignored, throwable) ->
 		{
 			if (throwable != null)
@@ -506,17 +627,34 @@ public class EmbertidePlugin extends Plugin
 		capture = null;
 		if (current == null)
 		{
-			return CompletableFuture.completedFuture(null);
+			return save;
 		}
-		return current.finish(reason, openStudio, planned).handle((ignored, throwable) ->
+		pendingSave = current;
+		handingOff = true;
+		return watchSave(current, current.finish(reason, openStudio, planned));
+	}
+
+	private CompletableFuture<Void> watchSave(OsrsCapture current, CompletableFuture<Void> result)
+	{
+		// Publication is updated before the returned future completes, including on
+		// client shutdown when another client-thread callback cannot be relied on.
+		save = result.whenComplete((ignored, throwable) ->
 		{
-			remember(current, throwable);
-			if (throwable != null)
+			if (throwable == null)
 			{
-				log.debug("capture finish failed: {}", rootMessage(throwable));
+				if (current.recorder().state() == Recorder.State.COMPLETE) { remember(current, null); }
+				pendingSave = null;
+				notice = current.recorder().state() == Recorder.State.IDLE
+					? "Recording cancelled before the first scene." : "Recording saved.";
 			}
-			return null;
+			else
+			{
+				notice = "Recording paused: retry saving or discard the unsaved recording.";
+				log.warn("Could not save Embertide recording; retained in memory for retry", throwable);
+			}
+			handingOff = false;
 		});
+		return save;
 	}
 
 	private void remember(OsrsCapture ended, Throwable throwable)
@@ -531,12 +669,6 @@ public class EmbertidePlugin extends Plugin
 			problem = recorder.error();
 		}
 		saved.add(new SavedFile(name, ended.part(), ended.seconds(), problem));
-	}
-
-	private boolean instanced()
-	{
-		WorldView view = client.getTopLevelWorldView();
-		return view != null && view.isInstance();
 	}
 
 	private static String rootMessage(Throwable throwable)

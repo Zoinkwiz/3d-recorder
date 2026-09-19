@@ -19,7 +19,8 @@ repositories {
 	mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
+// Filepath requires RuneLite 1.12.39 or later.
+def runeLiteVersion = findProperty('runeliteVersion') ?: '1.12.39-SNAPSHOT'
 def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
 
 dependencies {
@@ -32,7 +33,7 @@ dependencies {
 }
 
 group = 'com.extrinsiccognition'
-version = '0.2.0'
+version = '0.2.1'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
