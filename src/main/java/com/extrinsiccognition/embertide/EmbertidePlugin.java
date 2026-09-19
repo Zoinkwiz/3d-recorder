@@ -45,7 +45,7 @@ import net.runelite.client.util.Text;
 @Slf4j
 @PluginDescriptor(
 	name = "3D Replay Recorder",
-	internalName = "embertide",
+	internalName = "3d-recorder",
 	legacyDataDirectory = "embertide",
 	description = "Records your session as a 3D replay you can fly a camera through and cut into clips at embertide.gg. Nothing leaves your machine; other players appear as unnamed figures.",
 	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide"}
