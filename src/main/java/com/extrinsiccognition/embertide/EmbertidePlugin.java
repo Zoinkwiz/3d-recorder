@@ -174,9 +174,11 @@ public class EmbertidePlugin extends Plugin
 		switch (event.getGameState())
 		{
 			case LOADING:
+				if (capture != null) { capture.loading(true); }
 				rediscover = true;
 				break;
 			case LOGGED_IN:
+				if (capture != null) { capture.loading(false); }
 				rediscover = true;
 				if (capture == null)
 				{

@@ -565,7 +565,23 @@ public final class OsrsCapture
 	public void actorDespawned(Actor actor)
 	{
 		presentActors.remove(actor);
-		actorIds.remove(actor);
+		String id = actorIds.remove(actor);
+		if (recording && !armed && id != null && leftIds.add(id))
+		{
+			JsonObject payload = new JsonObject();
+			payload.addProperty("actor_id", id);
+			payload.addProperty("state", "left");
+			payload.addProperty("dimension", session.dimension);
+			emit("mccr.actor_lifecycle", session.time(), payload, id, false);
+		}
+	}
+
+	public void loading(boolean active)
+	{
+		if (!recording || armed) { return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("active", active);
+		emit("mccr.loading", session.time(), payload, PLAYER, false);
 	}
 
 	private void seedActors(WorldView view)
