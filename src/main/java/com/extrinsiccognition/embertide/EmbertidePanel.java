@@ -25,7 +25,7 @@ public final class EmbertidePanel extends PluginPanel
 	private final JTextArea status = new JTextArea();
 	private final JPanel files = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
-	private final JButton folder = new JButton("Recording folder path");
+	private final JButton folder = new JButton("Show my recordings");
 	private final JButton retry = new JButton("Retry saving");
 	private final JButton discard = new JButton("Discard unsaved recording");
 	private final Timer refresh;
@@ -42,13 +42,13 @@ public final class EmbertidePanel extends PluginPanel
 		JPanel top = new JPanel();
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 		top.setOpaque(false);
-		JLabel title = new JLabel("Embertide");
+		JLabel title = new JLabel("3D Replay Recorder");
 		title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
 		title.setForeground(ColorScheme.BRAND_ORANGE);
 		title.setAlignmentX(LEFT_ALIGNMENT);
 		top.add(title);
 		top.add(Box.createVerticalStrut(6));
-		JTextArea where = new JTextArea("Edit your clips in the Embertide app, or at");
+		JTextArea where = new JTextArea("Play as normal. When you're done, open your session in the Embertide app or at");
 		where.setEditable(false);
 		where.setLineWrap(true);
 		where.setWrapStyleWord(true);
@@ -59,7 +59,7 @@ public final class EmbertidePanel extends PluginPanel
 		JLabel studio = new JLabel("<html><u>embertide.gg/studio</u></html>");
 		studio.setForeground(ColorScheme.BRAND_ORANGE);
 		studio.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		studio.setToolTipText("Open Embertide Studio in your browser, then drag a file from the folder into it.");
+		studio.setToolTipText("Opens Studio in your browser. Drag a recording from your recordings folder into it.");
 		studio.setAlignmentX(LEFT_ALIGNMENT);
 		studio.addMouseListener(new MouseAdapter()
 		{
@@ -109,13 +109,13 @@ public final class EmbertidePanel extends PluginPanel
 			path.setColumns(40);
 			path.setRows(3);
 			path.selectAll();
-			javax.swing.JOptionPane.showMessageDialog(this, path, "Copy this path into your file manager", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+			javax.swing.JOptionPane.showMessageDialog(this, path, "Your recordings are here", javax.swing.JOptionPane.INFORMATION_MESSAGE);
 		});
-		folder.setToolTipText("Show a selectable path to the folder containing your saved recordings.");
+		folder.setToolTipText("Shows where your recordings are saved, so you can find them or drag one into Studio.");
 		retry.addActionListener(e -> plugin.retrySave());
 		discard.addActionListener(e -> {
 			if (javax.swing.JOptionPane.showConfirmDialog(this,
-				"Discard the unsaved recording? This cannot be undone.", "Discard recording",
+				"Throw away the recording that failed to save? You can't get it back.", "Discard recording",
 				javax.swing.JOptionPane.YES_NO_OPTION) == javax.swing.JOptionPane.YES_OPTION)
 			{
 				plugin.discardSave();

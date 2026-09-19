@@ -16,7 +16,8 @@ public final class MccrSession
 
 	public final String id;
 	public Instant capturedAt;
-	public final String dimension;
+	/** Current coordinate space; the file header retains the initial dimension. */
+	public String dimension;
 	private long startedNanos;
 	private final double maxSeconds;
 	private int serial;

@@ -14,7 +14,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "captureRadius",
 		name = "Capture radius",
-		description = "How much ground around you is recorded. People are recorded wherever the client draws them; this is the map itself. Larger areas fill a recording's budget sooner.",
+		description = "How far around you the ground and objects are recorded. People are always recorded wherever the game shows them. Bigger areas make bigger files.",
 		position = 1
 	)
 	@Range(min = 4, max = 26)
@@ -26,7 +26,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "trackNpcs",
 		name = "Record nearby NPCs",
-		description = "Record nearby NPCs' positions, appearance, combat and optional overhead speech. Turning this off excludes NPCs from all recording channels.",
+		description = "Include NPCs in the replay: where they were, what they looked like, the fights. Off means no NPCs at all.",
 		position = 2
 	)
 	default boolean trackNpcs()
@@ -37,7 +37,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "trackPlayers",
 		name = "Record nearby players",
-		description = "Record nearby players' positions, appearance and combat as unnamed figures. Turning this off excludes them from all channels. Their names and chat are never recorded.",
+		description = "Include other players in the replay: where they were, what they wore, the fights. They appear as unnamed figures, and the plugin doesn't read their names or chat. Off means no other players at all.",
 		position = 3
 	)
 	default boolean trackPlayers()
@@ -48,7 +48,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOverheadText",
 		name = "Record what NPCs say overhead",
-		description = "Record the lines the game draws above NPCs' heads. Other players' chat is never recorded, wherever it is drawn.",
+		description = "Include what NPCs say above their heads. This doesn't cover other players, whose chat the plugin doesn't read.",
 		position = 4
 	)
 	default boolean recordOverheadText()
@@ -59,7 +59,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOwnChat",
 		name = "Record your public chat",
-		description = "Include your own public chat in the saved replay. Private, clan, friends and other players' chat are never recorded.",
+		description = "Include your own public chat in the replay. Only yours, and only public: the plugin doesn't read private, clan or friends chat, or anything other players say.",
 		position = 8
 	)
 	default boolean recordOwnChat()
@@ -70,7 +70,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Start recording when you log in",
-		description = "Begin recording as soon as you are in the world. Turn this off to record only when you press Start recording.",
+		description = "Start recording as soon as you're in the world. Turn it off if you'd rather press Start yourself.",
 		position = 5
 	)
 	default boolean recordOnLogin()
@@ -81,10 +81,10 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "chunkMinutes",
 		name = "Minutes per file",
-		description = "A session is saved as a chain of files, one every this many minutes, each written when it ends. Shorter files mean less is lost if the client crashes; Studio joins the chain into one timeline.",
+		description = "How often your session is saved. Lower means less is lost if the client crashes. Studio shows the whole session as one recording either way.",
 		position = 7
 	)
-	@Range(min = 5, max = 20)
+	@Range(min = 1, max = 20)
 	default int chunkMinutes()
 	{
 		return 20;
@@ -93,7 +93,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
-		description = "After saving on logout, open embertide.gg/studio. Use Recording folder path to find the file to drag in.",
+		description = "Open Studio in your browser when you log out, ready to drag your recording into.",
 		position = 6
 	)
 	default boolean openStudioOnLogout()

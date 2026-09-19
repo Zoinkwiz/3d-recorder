@@ -72,7 +72,9 @@ public final class OsrsCapture
 	private final Map<Actor, String> actorIds = new java.util.IdentityHashMap<>();
 	private final String playerName;
 	private final int world;
-	private final boolean instance;
+	private boolean instance;
+	private int segment;
+	private final Set<String> leftIds = new HashSet<>();
 	private final Map<Long, String> known = new HashMap<>();
 	private final Set<Long> objectTiles = new HashSet<>();
 	private final Set<String> actors = new HashSet<>();
@@ -198,12 +200,24 @@ public final class OsrsCapture
 
 	public void hitsplat(Actor target, int amount, boolean mine, Player me)
 	{
+		hitsplat(target, amount, mine, me, -1, -1);
+	}
+
+	public void hitsplat(Actor target, net.runelite.api.Hitsplat splat, Player me)
+	{
+		if (splat == null) { return; }
+		hitsplat(target, splat.getAmount(), splat.isMine(), me, splat.getHitsplatType(),
+			Math.max(0, Math.min(500, splat.getDisappearsOnGameCycle() - client.getGameCycle())) / 50.0);
+	}
+
+	private void hitsplat(Actor target, int amount, boolean mine, Player me, int type, double remaining)
+	{
 		if (!acceptingEvents() || !eventActor(target, me))
 		{
 			return;
 		}
 		double t = session.time();
-		hit(target, amount, mine, me, t);
+		hit(target, amount, mine, me, t, type, remaining);
 		if (target == me)
 		{
 			Actor attacker = me.getInteracting();
@@ -239,7 +253,7 @@ public final class OsrsCapture
 	 * Preserve observed health ratios and scales; omit unknown values (-1).
 	 * Only the local player's health is available as exact hitpoints.
 	 */
-	private void hit(Actor target, int amount, boolean mine, Player me, double t)
+	private void hit(Actor target, int amount, boolean mine, Player me, double t, int type, double remaining)
 	{
 		String targetId = target == me ? PLAYER : actorId(target);
 		if (targetId == null)
@@ -250,6 +264,13 @@ public final class OsrsCapture
 		JsonObject payload = new JsonObject();
 		payload.addProperty("target", targetId);
 		payload.addProperty("amount", Math.max(0, amount));
+		if (type >= 0)
+		{
+			payload.addProperty("hitsplat_type", type);
+			payload.addProperty("hitsplat_remaining", remaining);
+			payload.addProperty("hitsplat_tint_disabled", client.getVarbitValue(10236));
+			payload.addProperty("hitsplat_maxhit_disabled", client.getVarbitValue(14196));
+		}
 		String source = mine ? PLAYER : (target == me && eventActor(me.getInteracting(), me) ? actorId(me.getInteracting()) : null);
 		if (source != null)
 		{
@@ -336,6 +357,8 @@ public final class OsrsCapture
 		if (speechCount >= MAX_SPEECH) { stop("speech limit", true); return; }
 		JsonObject payload = new JsonObject();
 		payload.addProperty("sender", name == null ? "You" : name);
+		Player speaker = client.getLocalPlayer();
+		payload.addProperty("overhead_remaining", speaker != null && speaker.getOverheadCycle() > 0 ? Math.min(500, speaker.getOverheadCycle()) / 50.0 : 3.0);
 		payload.addProperty("text", line);
 		payload.addProperty("dimension", session.dimension);
 		if (emit("chat.message", session.time(), payload, PLAYER, false))
@@ -366,6 +389,7 @@ public final class OsrsCapture
 		lastSaid.put(id, line);
 		JsonObject payload = new JsonObject();
 		payload.addProperty("sender", actor.getName() == null ? "Someone" : Text.removeTags(actor.getName()));
+		payload.addProperty("overhead_remaining", actor.getOverheadCycle() > 0 ? Math.min(500, actor.getOverheadCycle()) / 50.0 : 3.0);
 		payload.addProperty("text", line.length() > 200 ? line.substring(0, 200) : line);
 		payload.addProperty("dimension", session.dimension);
 		if (emit("chat.message", session.time(), payload, id, false))
@@ -492,6 +516,48 @@ public final class OsrsCapture
 		payload.addProperty("dimension", session.dimension);
 		emit("mccr.capture_start", session.time(), payload, PLAYER, false);
 		statusLine = "Recording in memory";
+	}
+
+	/**
+	 * Emit a scene boundary and reset coordinate-dependent baselines without closing the file.
+	 * Mark actors as left so replay cannot interpolate between different scene spaces.
+	 */
+	public void sceneChanged(WorldView view)
+	{
+		String dimension = SceneIdentity.of(view).dimension();
+		if (armed || !recording)
+		{
+			session.dimension = dimension;
+			instance = view != null && view.isInstance();
+			return;
+		}
+		double t = session.time();
+		for (String id : new java.util.HashSet<>(actorIds.values()))
+		{
+			JsonObject left = new JsonObject();
+			left.addProperty("actor_id", id);
+			left.addProperty("state", "left");
+			left.addProperty("dimension", session.dimension);
+			if (!emit("mccr.actor_lifecycle", t, left, id, false)) { return; }
+			leftIds.add(id);
+		}
+		presentActors.clear();
+		actorIds.clear();
+		known.clear();
+		objectTiles.clear();
+		visitedRegions.clear();
+		lastRegions = new int[0];
+		lastPlayerCell = Long.MIN_VALUE;
+		instanceHeightsWritten = false;
+		session.dimension = dimension;
+		instance = view != null && view.isInstance();
+		segment++;
+		JsonObject scene = new JsonObject();
+		scene.addProperty("dimension", dimension);
+		scene.addProperty("reset", true);
+		scene.addProperty("segment", segment);
+		scene.addProperty("instance", instance);
+		emit("mccr.scene", t, scene, PLAYER, false);
 	}
 
 	public void actorSpawned(Actor actor) { if (actor != null) { presentActors.add(actor); } }
@@ -1026,6 +1092,14 @@ public final class OsrsCapture
 
 	private boolean announce(String id, String name, String color, String kind, int npcId, int combatLevel, double t)
 	{
+		if (leftIds.remove(id))
+		{
+			JsonObject rejoin = new JsonObject();
+			rejoin.addProperty("actor_id", id);
+			rejoin.addProperty("state", "joined");
+			rejoin.addProperty("dimension", session.dimension);
+			if (!emit("mccr.actor_lifecycle", t, rejoin, id, false)) { return false; }
+		}
 		if (actors.contains(id))
 		{
 			return true;
@@ -1145,6 +1219,9 @@ public final class OsrsCapture
 		osrs.addProperty("animation_frame", actor.getAnimationFrame());
 		osrs.addProperty("graphic", actor.getGraphic());
 		osrs.addProperty("graphic_height", actor.getGraphicHeight());
+		osrs.addProperty("logical_height", actor.getLogicalHeight());
+		osrs.addProperty("health_ratio", actor.getHealthRatio());
+		osrs.addProperty("health_scale", actor.getHealthScale());
 		payload.add("osrs", osrs);
 		if (emit("player.position", t, payload, id, false))
 		{
@@ -1152,6 +1229,11 @@ public final class OsrsCapture
 		}
 	}
 
+	/**
+	 * Positional osrs.poses schema:
+	 * [id, x, y, plane, height, orientation, animation, pose animation, frame, graphic,
+	 * npc id or -1, graphic height, client slot, logical height, health ratio, health scale].
+	 */
 	private void crowdPose(JsonArray crowd, WorldView view, Actor actor, String id, WorldPoint at, int npcId)
 	{
 		int height = tileHeight(view, at);
@@ -1171,6 +1253,9 @@ public final class OsrsCapture
 		entry.add(actor.getGraphicHeight());
 		// The client slot preserves draw ordering for actors sharing a tile.
 		entry.add(actor instanceof Player ? ((Player) actor).getId() : actor instanceof NPC ? ((NPC) actor).getIndex() : -1);
+		entry.add(actor.getLogicalHeight());
+		entry.add(actor.getHealthRatio());
+		entry.add(actor.getHealthScale());
 		crowd.add(entry);
 	}
 

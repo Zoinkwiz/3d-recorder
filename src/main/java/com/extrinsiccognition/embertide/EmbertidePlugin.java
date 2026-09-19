@@ -184,8 +184,7 @@ public class EmbertidePlugin extends Plugin
 				}
 				else if (!SceneIdentity.of(client.getTopLevelWorldView()).equals(sceneIdentity))
 				{
-					endCapture("left the previous area", false, true);
-					beginCapture(true);
+					changeScene();
 				}
 				break;
 			case LOGIN_SCREEN:
@@ -216,8 +215,9 @@ public class EmbertidePlugin extends Plugin
 		}
 		if (!SceneIdentity.of(client.getTopLevelWorldView()).equals(sceneIdentity))
 		{
-			endCapture("left the previous area", false, true);
-			return;
+			changeScene();
+			current = capture;
+			if (current == null) { return; }
 		}
 		if (current.exhausted())
 		{
@@ -333,7 +333,7 @@ public class EmbertidePlugin extends Plugin
 		{
 			return;
 		}
-		current.hitsplat(event.getActor(), event.getHitsplat().getAmount(), event.getHitsplat().isMine(), client.getLocalPlayer());
+		current.hitsplat(event.getActor(), event.getHitsplat(), client.getLocalPlayer());
 	}
 
 	@Subscribe
@@ -575,6 +575,15 @@ public class EmbertidePlugin extends Plugin
 		String who = playerName == null ? "" : playerName.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
 		String when = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
 		return "osrs-" + when + (who.isEmpty() ? "" : "-" + who);
+	}
+
+	private void changeScene()
+	{
+		WorldView view = client.getTopLevelWorldView();
+		sceneIdentity = SceneIdentity.of(view);
+		OsrsCapture current = capture;
+		if (current != null) { current.sceneChanged(view); }
+		rediscover = true;
 	}
 
 	private void beginCapture(boolean freshBaseline)
