@@ -96,6 +96,8 @@ public class EmbertidePlugin extends Plugin
 	private Gson gson;
 	@Inject
 	private java.util.concurrent.ScheduledExecutorService executor;
+	@Inject
+	private okhttp3.OkHttpClient okHttpClient;
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -559,9 +561,18 @@ public class EmbertidePlugin extends Plugin
 		{
 			text.append("\n\nEach recording is written to its file when it ends. Other players are recorded as unnamed figures.");
 		}
+		if (recorder instanceof LiveMirror)
+		{
+			String live = ((LiveMirror) recorder).liveNote();
+			if (!live.isEmpty())
+			{
+				text.append("\n\n").append(live);
+			}
+		}
 		boolean busy = !current.recording();
-		String name = recorder instanceof MccrFileRecorder && ((MccrFileRecorder) recorder).path() != null
-			? ((MccrFileRecorder) recorder).path().getFileName().toString()
+		Recorder writing = recorder instanceof LiveMirror ? ((LiveMirror) recorder).file() : recorder;
+		String name = writing instanceof MccrFileRecorder && ((MccrFileRecorder) writing).path() != null
+			? ((MccrFileRecorder) writing).path().getFileName().toString()
 			: "";
 		return new PanelState(text.toString(), name, files, !busy, !busy);
 	}
@@ -611,6 +622,14 @@ public class EmbertidePlugin extends Plugin
 			Player who = client.getLocalPlayer();
 			return fileStem(who == null ? null : who.getName());
 		}, executor);
+		if (config.liveToApp())
+		{
+			RecorderEndpoint endpoint = RecorderEndpoint.locate();
+			if (endpoint != null)
+			{
+				recorder = new LiveMirror(recorder, new MccrRecorderClient(okHttpClient, gson, executor, endpoint));
+			}
+		}
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me == null ? null : me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
 		capture = next;
