@@ -45,9 +45,16 @@ close RuneLite, because a crash loses anything that hasn't been saved yet.
 
 ## What stays out
 
-Nothing leaves your machine. The plugin doesn't connect to anything. Your
-recording is a file in RuneLite's folder and it only goes anywhere if you
-put it in Studio yourself or sign in to the app and save it.
+Nothing leaves your machine. By default the plugin doesn't connect to
+anything: your recording is a file in RuneLite's folder, and it only goes
+anywhere if you put it in Studio yourself or sign in to the app and save
+it. If you turn on Show live in Embertide (off unless you do), the plugin
+also sends the current recording, row by row, to the Embertide app running
+on this same computer, over a local connection that never goes past your
+own machine, and keeps that connection open so the app can tell the
+session is still running. What the app then does with it is the app's own
+settings, not the plugin's: it draws it, and it uploads it only if you
+have signed in and chosen to save.
 
 Other players show up as figures wearing what they wore, moving how they
 moved, and that's it. The plugin doesn't read their names, combat levels
@@ -61,7 +68,9 @@ altogether.
 Each part of a session is written in one go when it ends, whether that's
 the regular save every few minutes, pressing Stop, logging out or closing
 the client. In between, it sits in memory. So there's no file slowly
-filling up that could be read as a live feed of where everyone is.
+filling up that could be read as a live feed of where everyone is; the
+only live feed is the one you switch on, and it goes to the app on your
+machine and nowhere else.
 
 The plugin doesn't play for you and doesn't look at your inventory, bank
 or account. It only records what's on your screen.
