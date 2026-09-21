@@ -116,7 +116,22 @@ public final class LiveMirror implements Recorder
 		{
 			try
 			{
-				live.finish().exceptionally(error -> null);
+				// Finished, not vanished: close it so the app doesn't count a lost client.
+				live.finish().whenComplete((ignored, error) ->
+				{
+					if (error != null)
+					{
+						return;
+					}
+					try
+					{
+						live.closeLifetime();
+					}
+					catch (RuntimeException e)
+					{
+						log.debug("closing the live lifetime after the seal failed", e);
+					}
+				}).exceptionally(error -> null);
 			}
 			catch (RuntimeException e)
 			{
