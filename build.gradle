@@ -40,6 +40,14 @@ tasks.withType(JavaCompile).configureEach {
 	options.release.set(11)
 }
 
+// Smoke test against a running app: ./gradlew smoke -Pendpoint=<endpoint.json>
+tasks.register('smoke', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.extrinsiccognition.embertide.RecorderSmoke'
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+	args findProperty('endpoint') ?: ''
+}
+
 tasks.register('run', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = pluginMainClass
