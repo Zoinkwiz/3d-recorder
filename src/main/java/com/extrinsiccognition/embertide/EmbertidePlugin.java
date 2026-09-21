@@ -359,7 +359,7 @@ public class EmbertidePlugin extends Plugin
 		{
 			return;
 		}
-		current.statChanged(event.getSkill(), event.getLevel());
+		current.statChanged(event.getSkill(), event.getLevel(), event.getXp(), event.getBoostedLevel());
 	}
 
 	@Subscribe

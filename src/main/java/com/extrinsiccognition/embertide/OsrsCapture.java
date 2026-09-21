@@ -154,8 +154,10 @@ public final class OsrsCapture
 	private int hitCount = 0;
 	private static final int MAX_MOMENTS = 2000;
 	private int[] lastCamera;
+	private int[] lastVitals;
 	private int cameraCount;
-	private static final int MAX_CAMERA = 40000;
+	// Camera rows land on every change, roughly ten a second while turning.
+	private static final int MAX_CAMERA = 4_000_000;
 	private int speechCount;
 	private static final int MAX_SPEECH = 600;
 	private final Map<String, String> lastSaid = new HashMap<>();
@@ -326,18 +328,25 @@ public final class OsrsCapture
 		}
 	}
 
-	public void statChanged(Skill skill, int level)
+	public void statChanged(Skill skill, int level, int xp, int boosted)
 	{
 		if (!acceptingEvents() || skill == null)
 		{
 			return;
 		}
+		double t = session.time();
+		JsonObject stat = new JsonObject();
+		stat.addProperty("skill", skill.name().toLowerCase(Locale.ROOT));
+		stat.addProperty("level", level);
+		stat.addProperty("xp", xp);
+		stat.addProperty("boosted", boosted);
+		stat.addProperty("dimension", session.dimension);
+		emit("osrs.stat", t, stat, PLAYER, false);
 		Integer before = levels.put(skill, level);
 		if (before == null || level <= before)
 		{
 			return;
 		}
-		double t = session.time();
 		JsonObject payload = new JsonObject();
 		payload.addProperty("advancement_id", "osrs:level:" + skill.name().toLowerCase(Locale.ROOT) + ":" + level);
 		payload.addProperty("title", skill.getName() + " level " + level);
@@ -767,6 +776,7 @@ public final class OsrsCapture
 		}
 		WorldPoint at = me.getWorldLocation();
 		if (rediscover) { seedActors(view); }
+		vitals(t);
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
@@ -1243,6 +1253,33 @@ public final class OsrsCapture
 		{
 			poseCount++;
 		}
+	}
+
+	/** HP, prayer, run energy (0.01%) and special attack (0.1%), on change. */
+	private void vitals(double t)
+	{
+		int[] now = {
+			client.getBoostedSkillLevel(Skill.HITPOINTS),
+			client.getRealSkillLevel(Skill.HITPOINTS),
+			client.getBoostedSkillLevel(Skill.PRAYER),
+			client.getRealSkillLevel(Skill.PRAYER),
+			client.getEnergy(),
+			client.getVarpValue(net.runelite.api.VarPlayer.SPECIAL_ATTACK_PERCENT),
+		};
+		if (lastVitals != null && Arrays.equals(lastVitals, now))
+		{
+			return;
+		}
+		lastVitals = now;
+		JsonObject payload = new JsonObject();
+		payload.addProperty("hp", now[0]);
+		payload.addProperty("hp_max", now[1]);
+		payload.addProperty("prayer", now[2]);
+		payload.addProperty("prayer_max", now[3]);
+		payload.addProperty("energy", now[4]);
+		payload.addProperty("special", now[5]);
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.vitals", t, payload, PLAYER, false);
 	}
 
 	/**
