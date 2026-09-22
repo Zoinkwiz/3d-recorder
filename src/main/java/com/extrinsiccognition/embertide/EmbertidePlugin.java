@@ -95,6 +95,8 @@ public class EmbertidePlugin extends Plugin
 	@Inject
 	private Gson gson;
 	@Inject
+	private ConfigManager configManager;
+	@Inject
 	private java.util.concurrent.ScheduledExecutorService executor;
 
 	private EmbertidePanel panel;
@@ -613,6 +615,7 @@ public class EmbertidePlugin extends Plugin
 		}, executor);
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me == null ? null : me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
+		next.account(accountKey());
 		capture = next;
 		continuing = true;
 		rediscover = freshBaseline;
@@ -625,6 +628,18 @@ public class EmbertidePlugin extends Plugin
 				log.debug("capture open failed", throwable);
 			}
 		});
+	}
+
+	/** Opaque account key; the salt lives in plugin settings. */
+	private String accountKey()
+	{
+		String salt = configManager.getConfiguration(EmbertideConfig.GROUP, AccountKey.SALT_KEY);
+		if (salt == null || salt.isEmpty())
+		{
+			salt = AccountKey.newSalt();
+			configManager.setConfiguration(EmbertideConfig.GROUP, AccountKey.SALT_KEY, salt);
+		}
+		return AccountKey.of(salt, client.getAccountHash());
 	}
 
 	private CompletableFuture<Void> endCapture(String reason, boolean openStudio)
