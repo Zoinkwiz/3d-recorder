@@ -110,6 +110,7 @@ public final class OsrsCapture
 	private volatile String statusLine = "Starting";
 	private CompletableFuture<Void> finishing;
 	private volatile double sealedAt = -1;
+	private String account;
 
 	public OsrsCapture(Client client, Recorder recorder, EmbertideConfig config, String dimension, String playerName, int world)
 	{
@@ -131,6 +132,12 @@ public final class OsrsCapture
 		this.playerName = playerName == null || playerName.isEmpty() ? "You" : playerName;
 		this.world = world;
 		this.instance = dimension.startsWith("osrs:instance:");
+	}
+
+	/** Opaque account key; null leaves the recording unattributed. */
+	void account(String key)
+	{
+		account = key;
 	}
 
 	public String id()
@@ -609,6 +616,12 @@ public final class OsrsCapture
 		header.addProperty("profile", MccrSession.PROFILE);
 		header.addProperty("schema", "CorePercept envelope + ec.mccr.spatial/1 + " + OSRS_PROFILE);
 		header.addProperty("game", MccrSession.GAME);
+		if (account != null)
+		{
+			JsonObject source = new JsonObject();
+			source.addProperty("account", account);
+			header.add("source", source);
+		}
 		header.addProperty("place_id", "local:osrs:world:" + world + ":" + session.dimension);
 		String started = session.capturedAt.toString();
 		header.addProperty("day", started.substring(0, 10));
@@ -664,7 +677,7 @@ public final class OsrsCapture
 		JsonArray actorList = new JsonArray();
 		actorList.add(actorEntry(PLAYER, playerName, PLAYER_COLOR));
 		header.add("actors", actorList);
-		header.addProperty("channel_rule", "Local scene observations, optional own public chat and NPC overhead speech; other-player names and chat, private/clan/friends chat and account credentials are excluded.");
+		header.addProperty("channel_rule", "Local scene observations, optional own public chat and NPC overhead speech; other-player names and chat, private/clan/friends chat and account credentials are excluded; the account is named only by an opaque salted key.");
 		header.addProperty("clock", "ts is capture UTC + elapsed_s; elapsed_s is monotonic wall time, not game ticks. Equal-time records retain file order.");
 		return header;
 	}
