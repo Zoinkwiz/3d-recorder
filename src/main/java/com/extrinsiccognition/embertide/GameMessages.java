@@ -24,7 +24,7 @@ final class GameMessages
 	private static final int MAX_NAME = 64;
 
 	private static final Pattern KILL_COUNT = Pattern.compile(
-		"Your (?:completion count for |subdued |completed )?(.+?) (?:(?:kill|harvest|lap|completion|chest|success) )?count is: ([\\d,]+)\\.?");
+		"Your (?!.* lap count is: )(?:completion count for |subdued |completed )?((?:[A-Z]|herbiboar).*?) (?:(?:kill|harvest|completion|chest|success) )?count is: ([\\d,]+)\\.?");
 	private static final Pattern PERSONAL_BEST = Pattern.compile(
 		"(?:.*\\s)?(?:[Dd]uration|[Tt]ime): ([\\d:.]+) \\(new personal best\\)\\.?(?:\\s.*)?");
 	private static final Pattern PET_FOLLOWER = Pattern.compile("You have a funny feeling like you're being followed\\.?");

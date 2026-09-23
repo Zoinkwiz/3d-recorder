@@ -40,6 +40,7 @@ public class GameMessagesTest
 		assertEquals("Barrows", expect("Your Barrows chest count is: 12.", "kill_count").fields.get("boss").getAsString());
 		assertEquals("Gauntlet", expect("Your Gauntlet completion count is: 7.", "kill_count").fields.get("boss").getAsString());
 		assertEquals("Hueycoatl", expect("Your subdued Hueycoatl count is: 3.", "kill_count").fields.get("boss").getAsString());
+		assertEquals("herbiboar", expect("Your herbiboar harvest count is: 40.", "kill_count").fields.get("boss").getAsString());
 	}
 
 	@Test
@@ -173,6 +174,10 @@ public class GameMessagesTest
 			"Valuable drop: Dragon warhammer",
 			"Your task is to kill 150 Blue dragons.",
 			"You have completed 3 laps of the course.",
+			"Your Canifis Agility Course lap count is: 57.",
+			"Your Gnome Stronghold Agility lap count is: 12.",
+			"Your Rellekka Rooftop lap count is: <col=ff0000>3</col>.",
+			"Your reward count is: 3.",
 			"Well done! You have completed an easy task in the Ardougne area. Your Achievement Diary has been updated.",
 			"A superior foe",
 			"Welcome to Old School RuneScape.",

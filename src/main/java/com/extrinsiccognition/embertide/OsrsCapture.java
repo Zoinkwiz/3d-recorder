@@ -517,15 +517,19 @@ public final class OsrsCapture
 	/** Likeliest attacker of the player, or null if ambiguous. */
 	private Actor attacker(Player me)
 	{
-		Actor mine = me.getInteracting();
-		if (mine != null && mine.getInteracting() == me)
+		return likelyAttacker(me, me.getInteracting(), presentActors, Actor::getInteracting);
+	}
+
+	static <A> A likelyAttacker(A me, A mine, Iterable<? extends A> present, java.util.function.Function<A, ?> interacting)
+	{
+		if (mine != null && interacting.apply(mine) == me)
 		{
 			return mine;
 		}
-		Actor only = null;
-		for (Actor actor : presentActors)
+		A only = null;
+		for (A actor : present)
 		{
-			if (actor != me && actor.getInteracting() == me)
+			if (actor != me && interacting.apply(actor) == me)
 			{
 				if (only != null)
 				{
@@ -534,7 +538,7 @@ public final class OsrsCapture
 				only = actor;
 			}
 		}
-		return only;
+		return only != null ? only : mine;
 	}
 
 	private String interactingId(Actor actor, Player me)
