@@ -100,6 +100,8 @@ public class EmbertidePlugin extends Plugin
 	private java.util.concurrent.ScheduledExecutorService executor;
 	@Inject
 	private okhttp3.OkHttpClient okHttpClient;
+	@Inject
+	private net.runelite.client.game.ItemManager itemManager;
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -369,7 +371,20 @@ public class EmbertidePlugin extends Plugin
 	{
 		OsrsCapture current = capture;
 		Player me = client.getLocalPlayer();
-		if (current == null || me == null || !config.recordOwnChat() || event.getType() != ChatMessageType.PUBLICCHAT)
+		if (current == null || me == null)
+		{
+			return;
+		}
+		if (event.getType() == ChatMessageType.GAMEMESSAGE || event.getType() == ChatMessageType.SPAM)
+		{
+			// Allowlisted kinds only.
+			if (config.recordMoments())
+			{
+				current.gameMessage(GameMessages.match(event.getType(), event.getMessage()));
+			}
+			return;
+		}
+		if (!config.recordOwnChat() || event.getType() != ChatMessageType.PUBLICCHAT)
 		{
 			return;
 		}
@@ -378,6 +393,58 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		current.ownChat(Text.removeTags(event.getMessage()), me.getName());
+	}
+
+	@Subscribe
+	public void onNpcLootReceived(net.runelite.client.events.NpcLootReceived event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || !config.recordMoments())
+		{
+			return;
+		}
+		NPC npc = event.getNpc();
+		current.loot("npc", npc == null ? null : npc.getName(), npc, priced(event.getItems()));
+	}
+
+	@Subscribe
+	public void onLootReceived(net.runelite.client.plugins.loottracker.LootReceived event)
+	{
+		OsrsCapture current = capture;
+		// NPC kills arrive via NpcLootReceived.
+		if (current == null || !config.recordMoments() || event.getType() == null
+			|| event.getType() == net.runelite.http.api.loottracker.LootRecordType.NPC)
+		{
+			return;
+		}
+		String kind = event.getType().name().toLowerCase(java.util.Locale.ROOT);
+		// Never record another player's name.
+		current.loot(kind, "player".equals(kind) ? null : event.getName(), null, priced(event.getItems()));
+	}
+
+	/** [item id, quantity, GE price each]; client thread. */
+	private java.util.List<int[]> priced(java.util.Collection<net.runelite.client.game.ItemStack> items)
+	{
+		java.util.List<int[]> out = new java.util.ArrayList<>();
+		if (items == null)
+		{
+			return out;
+		}
+		for (net.runelite.client.game.ItemStack stack : items)
+		{
+			int id = stack.getId();
+			int each;
+			try
+			{
+				each = itemManager.getItemPrice(itemManager.canonicalize(id));
+			}
+			catch (RuntimeException e)
+			{
+				each = 0;
+			}
+			out.add(new int[]{id, stack.getQuantity(), each});
+		}
+		return out;
 	}
 
 	@Subscribe
