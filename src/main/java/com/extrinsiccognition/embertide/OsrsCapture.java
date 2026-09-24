@@ -22,6 +22,7 @@ import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
 import net.runelite.api.GraphicsObject;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
@@ -79,6 +80,7 @@ public final class OsrsCapture
 	private final Set<Long> objectTiles = new HashSet<>();
 	private final Set<String> actors = new HashSet<>();
 	private final Map<String, Integer> appearance = new HashMap<>();
+	private final Map<String, Integer> shownNpc = new HashMap<>();
 	private final Map<String, String> pseudonyms;
 	private final String series;
 	private final int part;
@@ -432,11 +434,13 @@ public final class OsrsCapture
 		boolean npc = actor instanceof NPC;
 		if (!announce(id, npc ? actorName(actor) : pseudonym(actor.getName()),
 			npc ? NPC_COLOR : OTHER_PLAYER_COLOR, npc ? "npc" : "player",
-			npc ? ((NPC) actor).getId() : -1, npc ? ((NPC) actor).getCombatLevel() : -1, t))
+			npc ? ((NPC) actor).getId() : -1, npc ? shownNpcId((NPC) actor) : -1,
+			npc ? ((NPC) actor).getCombatLevel() : -1, t))
 		{
 			return false;
 		}
 		if (actor instanceof Player) { appearance((Player) actor, id, t); }
+		if (npc) { npcVariant((NPC) actor, id, t); }
 		pose(client.getTopLevelWorldView(), actor, id, actor.getWorldLocation(), t, false,
 			npc ? ((NPC) actor).getId() : -1);
 		return recording;
@@ -817,15 +821,16 @@ public final class OsrsCapture
 			{
 				NPC npc = (NPC) other;
 				String name = SceneMapper.objectMaterial(npc.getName());
-				if (announce(id, name == null ? "NPC" : npc.getName(), NPC_COLOR, "npc", npc.getId(), npc.getCombatLevel(), t))
+				if (announce(id, name == null ? "NPC" : npc.getName(), NPC_COLOR, "npc", npc.getId(), shownNpcId(npc), npc.getCombatLevel(), t))
 				{
+					npcVariant(npc, id, t);
 					crowdPose(crowd, view, npc, id, npc.getWorldLocation(), npc.getId());
 				}
 			}
 			else
 			{
 				Player player = (Player) other;
-				if (announce(id, pseudonym(player.getName()), OTHER_PLAYER_COLOR, "player", -1, -1, t))
+				if (announce(id, pseudonym(player.getName()), OTHER_PLAYER_COLOR, "player", -1, -1, -1, t))
 				{
 					appearance(player, id, t);
 					crowdPose(crowd, view, player, id, player.getWorldLocation(), -1);
@@ -1119,7 +1124,7 @@ public final class OsrsCapture
 		return fresh;
 	}
 
-	private boolean announce(String id, String name, String color, String kind, int npcId, int combatLevel, double t)
+	private boolean announce(String id, String name, String color, String kind, int npcId, int shownNpcId, int combatLevel, double t)
 	{
 		if (leftIds.remove(id))
 		{
@@ -1148,6 +1153,10 @@ public final class OsrsCapture
 		if (npcId >= 0)
 		{
 			payload.addProperty("npc_id", npcId);
+			if (shownNpcId != npcId)
+			{
+				payload.addProperty("shown_npc_id", shownNpcId);
+			}
 		}
 		if (combatLevel >= 0)
 		{
@@ -1263,6 +1272,27 @@ public final class OsrsCapture
 	 * [id, x, y, plane, height, orientation, animation, pose animation, frame, graphic,
 	 * npc id or -1, graphic height, client slot, logical height, health ratio, health scale].
 	 */
+	// -1 while hidden
+	private static int shownNpcId(NPC npc)
+	{
+		NPCComposition shown = npc.getTransformedComposition();
+		return shown == null ? -1 : shown.getId();
+	}
+
+	private void npcVariant(NPC npc, String id, double t)
+	{
+		int shown = shownNpcId(npc);
+		Integer before = shownNpc.put(id, shown);
+		if (before == null || before == shown)
+		{
+			return;
+		}
+		JsonObject payload = new JsonObject();
+		payload.addProperty("npc_id", npc.getId());
+		payload.addProperty("shown_npc_id", shown);
+		emit("osrs.npc_variant", t, payload, id, false);
+	}
+
 	private void crowdPose(JsonArray crowd, WorldView view, Actor actor, String id, WorldPoint at, int npcId)
 	{
 		int height = tileHeight(view, at);
