@@ -176,6 +176,18 @@ public class EmbertidePlugin extends Plugin
 		switch (event.getGameState())
 		{
 			case LOADING:
+			case LOGGED_IN:
+			case HOPPING:
+			case CONNECTION_LOST:
+			case LOGIN_SCREEN:
+				if (capture != null) { capture.gameState(event.getGameState().name()); }
+				break;
+			default:
+				break;
+		}
+		switch (event.getGameState())
+		{
+			case LOADING:
 				if (capture != null) { capture.loading(true); }
 				rediscover = true;
 				break;
@@ -236,8 +248,7 @@ public class EmbertidePlugin extends Plugin
 		}
 		long began = System.nanoTime();
 		boolean opening = rediscover;
-		current.tick(rediscover);
-		rediscover = false;
+		if (current.tick(rediscover)) { rediscover = false; }
 		long spent = System.nanoTime() - began;
 		long tookMs = spent / 1_000_000L;
 		gameTickNanos += spent;

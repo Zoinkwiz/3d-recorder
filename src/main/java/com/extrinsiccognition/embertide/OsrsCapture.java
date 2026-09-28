@@ -102,7 +102,6 @@ public final class OsrsCapture
 	private int playerActors;
 	private long lastPlayerCell = Long.MIN_VALUE;
 	private final java.util.ArrayDeque<int[]> pending = new java.util.ArrayDeque<>();
-	private static final int TILES_PER_TICK = 60;
 	private int[] lastRegions = new int[0];
 	private final Set<Integer> visitedRegions = new HashSet<>();
 	private boolean instanceHeightsWritten;
@@ -595,6 +594,38 @@ public final class OsrsCapture
 		emit("mccr.loading", session.time(), payload, PLAYER, false);
 	}
 
+	/** Marks the scene as fully written: everything in the radius was captured this tick. */
+	JsonObject sceneLoaded(int tick, int baseX, int baseY, WorldPoint at, int cells, int objects, int npcs, int players)
+	{
+		JsonObject payload = new JsonObject();
+		payload.addProperty("tick", tick);
+		payload.addProperty("base_x", baseX);
+		payload.addProperty("base_y", baseY);
+		payload.addProperty("region", at.getRegionID());
+		JsonArray planes = new JsonArray();
+		planes.add(at.getPlane());
+		payload.add("planes", planes);
+		payload.addProperty("radius", radius);
+		JsonObject counts = new JsonObject();
+		counts.addProperty("cells", cells);
+		counts.addProperty("objects", objects);
+		counts.addProperty("npcs", npcs);
+		counts.addProperty("players", players);
+		payload.add("counts", counts);
+		payload.addProperty("dimension", session.dimension);
+		return payload;
+	}
+
+	public void gameState(String state)
+	{
+		if (!recording || armed) { return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("state", state);
+		payload.addProperty("tick", client.getTickCount());
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.game_state", session.time(), payload, PLAYER, false);
+	}
+
 	private void seedActors(WorldView view)
 	{
 		presentActors.clear();
@@ -651,6 +682,7 @@ public final class OsrsCapture
 			+ "osrs.motion on the 20 ms client tick with the visible state of nearby actors as [id, x, y, plane, orientation, animation, frame, pose_animation], x and y in fractional tiles, only when changed; "
 			+ "osrs.camera independently sampled as [x, y, height, yaw, pitch, scale, viewport_width, viewport_height]; "
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
+			+ "osrs.scene_loaded once the radius around the player is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
@@ -748,27 +780,28 @@ public final class OsrsCapture
 		return false;
 	}
 
-	public void tick(boolean rediscover)
+	/** False when the tick stopped early, so a pending scene load is retried. */
+	public boolean tick(boolean rediscover)
 	{
 		if (!recording)
 		{
-			return;
+			return false;
 		}
 		if (recorder.state() == Recorder.State.FAILED)
 		{
 			stop("recorder unavailable");
-			return;
+			return false;
 		}
 		double t = session.time();
 		if (!armed && checkLimit(t))
 		{
-			return;
+			return false;
 		}
 		WorldView view = client.getTopLevelWorldView();
 		Player me = client.getLocalPlayer();
 		if (view == null || me == null || me.getWorldLocation() == null)
 		{
-			return;
+			return false;
 		}
 		if (armed)
 		{
@@ -776,27 +809,29 @@ public final class OsrsCapture
 			if (welcomeScreenUp())
 			{
 				statusLine = "Waiting for you to enter the world";
-				return;
+				return false;
 			}
 			open();
 			t = session.time();
 			rediscover = true;
 		}
 		WorldPoint at = me.getWorldLocation();
+		int cellsBefore = known.size();
+		int objectsBefore = objectCount;
 		if (rediscover) { seedActors(view); }
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
 		}
-		if (!recording) { return; }
+		if (!recording) { return false; }
 		Scene skyScene = view.getScene();
 		JsonObject sky = sceneSkybox.changed(skyScene == null ? null : skyScene.getSkybox(),
 			client.getTextureProvider() == null ? 0.8 : client.getTextureProvider().getBrightness());
 		if (sky != null)
 		{
-			if (skyboxCount >= 2000) { stop("skybox limit", true); return; }
+			if (skyboxCount >= 2000) { stop("skybox limit", true); return false; }
 			sky.addProperty("dimension", session.dimension);
-			if (!emit("osrs.skybox", t, sky, PLAYER, false)) { return; }
+			if (!emit("osrs.skybox", t, sky, PLAYER, false)) { return false; }
 			skyboxCount++;
 		}
 		long cell = SceneMapper.key(at.getX(), at.getPlane(), at.getY());
@@ -808,11 +843,13 @@ public final class OsrsCapture
 		discoverPending(view, t);
 		if (!recording)
 		{
-			return;
+			return false;
 		}
 		appearance(me, PLAYER, t);
 		pose(view, me, PLAYER, at, t, true, -1);
 		JsonArray crowd = new JsonArray();
+		int npcsSeen = 0;
+		int playersSeen = 0;
 		crowdActors = inThePicture(view, me, at);
 		for (Actor other : crowdActors)
 		{
@@ -825,6 +862,7 @@ public final class OsrsCapture
 				{
 					npcVariant(npc, id, t);
 					crowdPose(crowd, view, npc, id, npc.getWorldLocation(), npc.getId());
+					npcsSeen++;
 				}
 			}
 			else
@@ -834,6 +872,7 @@ public final class OsrsCapture
 				{
 					appearance(player, id, t);
 					crowdPose(crowd, view, player, id, player.getWorldLocation(), -1);
+					playersSeen++;
 				}
 			}
 		}
@@ -842,7 +881,7 @@ public final class OsrsCapture
 			if (poseCount + crowd.size() > MAX_POSES)
 			{
 				stop("pose limit", true);
-				return;
+				return false;
 			}
 			JsonObject payload = new JsonObject();
 			payload.addProperty("dimension", session.dimension);
@@ -852,8 +891,14 @@ public final class OsrsCapture
 				poseCount += crowd.size();
 			}
 		}
+		if (rediscover && recording)
+		{
+			emit("osrs.scene_loaded", t, sceneLoaded(client.getTickCount(), view.getBaseX(), view.getBaseY(), at,
+				known.size() - cellsBefore, objectCount - objectsBefore, npcsSeen, playersSeen), PLAYER, false);
+		}
 		statusLine = String.format(Locale.ROOT, "Recording %d:%02d · %d cells · %d objects%s", (int) t / 60, (int) t % 60, known.size(), objectCount,
 			cellLimit || objectLimit ? " · area captured" : "");
+		return true;
 	}
 
 	private boolean welcomeScreenUp()
@@ -1384,8 +1429,7 @@ public final class OsrsCapture
 		JsonArray objects = new JsonArray();
 		int baseX = view.getBaseX();
 		int baseY = view.getBaseY();
-		int walked = 0;
-		while (!pending.isEmpty() && walked < TILES_PER_TICK)
+		while (!pending.isEmpty())
 		{
 			int[] next = pending.poll();
 			int worldX = next[0], worldY = next[1], plane = next[2];
@@ -1403,7 +1447,6 @@ public final class OsrsCapture
 			if (known.containsKey(SceneMapper.key(SceneMapper.groundCell(worldX, worldY, plane, height)))
 				&& known.containsKey(SceneMapper.key(SceneMapper.objectCell(worldX, worldY, plane, height)))
 				&& objectTiles.contains(tileKey)) { continue; }
-			walked++;
 			if (!cellLimit)
 			{
 				int[] ground = SceneMapper.groundCell(worldX, worldY, plane, height);
