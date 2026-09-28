@@ -84,6 +84,116 @@ public class MccrFileRecorderTest
 	}
 
 	@Test
+	public void aFailedSaveRetriesFromThePartial() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		List<String> rows = record(recorder, 300);
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		rows.addAll(record(recorder, 300, 300));
+		Path blocker = dir.resolve(recorder.path().getFileName() + "");
+		Files.createDirectory(blocker);
+		try
+		{
+			recorder.finish().get(10, TimeUnit.SECONDS);
+			throw new AssertionError("the save should fail");
+		}
+		catch (java.util.concurrent.ExecutionException expected)
+		{
+			// The sealed name is taken.
+		}
+		assertEquals(Recorder.State.FAILED, recorder.state());
+		assertEquals(0, recorder.pendingRows());
+		assertEquals(rows, lines(Files.readAllBytes(partials().get(0))));
+		Files.delete(blocker);
+		recorder.finish().get(10, TimeUnit.SECONDS);
+		assertEquals(Recorder.State.COMPLETE, recorder.state());
+		assertEquals(rows, lines(Files.readAllBytes(sealed())));
+		assertEquals(0, partials().size());
+	}
+
+	@Test
+	public void aFailedWriteRebuildsThePartialFromDisk() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		List<String> rows = record(recorder, 300);
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		rows.addAll(record(recorder, 1, 300));
+		settle();
+		recorder.dropStream();
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		rows.addAll(record(recorder, 200, 301));
+		settle();
+		// A crash now leaves one readable partial with every row.
+		List<Path> partials = partials();
+		assertEquals(1, partials.size());
+		assertEquals(rows, lines(Files.readAllBytes(partials.get(0))));
+		recorder.dropStream();
+		rows.addAll(record(recorder, 50, 501));
+		recorder.finish().get(10, TimeUnit.SECONDS);
+		assertEquals(rows, lines(Files.readAllBytes(sealed())));
+		assertEquals(0, partials().size());
+	}
+
+	@Test
+	public void discardDeletesThePartial() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		record(recorder, 100);
+		Path blocker = dir.resolve(recorder.path().getFileName() + "");
+		Files.createDirectory(blocker);
+		try { recorder.finish().get(10, TimeUnit.SECONDS); }
+		catch (java.util.concurrent.ExecutionException expected) { }
+		recorder.discard();
+		assertEquals(Recorder.State.COMPLETE, recorder.state());
+		assertEquals(0, partials().size());
+	}
+
+	@Test
+	public void theByteBudgetStillFillsWithoutHeldRows() throws Exception
+	{
+		MccrFileRecorder recorder = new MccrFileRecorder(gson, Filepath.Unchecked.getRooted(dir), () -> "osrs-test", worker,
+			MccrFileRecorder.END_RESERVE + 4096);
+		JsonObject header = new JsonObject();
+		header.addProperty("type", "mccr.header");
+		recorder.open(header).get();
+		int accepted = 0;
+		while (recorder.enqueue(row(accepted), false)) { accepted++; }
+		assertTrue(recorder.full());
+		assertTrue(accepted > 10);
+		assertTrue(recorder.budgetBytes() <= 4096);
+		assertTrue(!recorder.enqueue(row(0), false));
+		// Control rows may still use the end reserve.
+		assertTrue(recorder.enqueue(row(0), true));
+		recorder.finish().get(10, TimeUnit.SECONDS);
+		assertEquals(accepted + 2, lines(Files.readAllBytes(sealed())).size());
+	}
+
+	@Test
+	public void theRecordCapStillHolds() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		JsonObject header = new JsonObject();
+		header.addProperty("type", "mccr.header");
+		recorder.open(header).get();
+		JsonObject tiny = new JsonObject();
+		int accepted = 1;
+		while (recorder.enqueue(tiny, false)) { accepted++; }
+		assertEquals(MccrFileRecorder.MAX_RECORDS, accepted);
+		assertTrue(recorder.enqueue(tiny, true));
+		assertTrue(!recorder.enqueue(tiny, true));
+		recorder.finish().get(30, TimeUnit.SECONDS);
+		assertEquals(MccrFileRecorder.MAX_RECORDS + 1, lines(Files.readAllBytes(sealed())).size());
+	}
+
+	private static JsonObject row(int i)
+	{
+		JsonObject row = new JsonObject();
+		row.addProperty("type", "osrs.motion");
+		row.addProperty("elapsed_s", i * 0.6);
+		return row;
+	}
+
+	@Test
 	public void aTruncatedSealedFileReadsItsPrefix() throws Exception
 	{
 		MccrFileRecorder recorder = recorder();

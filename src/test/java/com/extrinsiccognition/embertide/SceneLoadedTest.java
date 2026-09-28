@@ -179,6 +179,79 @@ public class SceneLoadedTest
 		}
 	}
 
+	/**
+	 * Heap the file recorder keeps during a synthetic 20-minute part: 2,000 ticks, ten Varrock-sized
+	 * scene loads and 25 moving actors. Prints; does not assert a size.
+	 */
+	@Test
+	public void twentyMinutePartMemory() throws Exception
+	{
+		int[] varrock = {10275, 3796, 2066, 956};
+		Tile[][][] tiles = varrockTiles(varrock);
+		java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("part-memory");
+		java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+		long baseline = usedHeap();
+		MccrFileRecorder file = new MccrFileRecorder(new com.google.gson.Gson(), net.runelite.client.util.Filepath.Unchecked.getRooted(dir), () -> "osrs-memory", worker);
+		OsrsCapture capture = capture(file, 12, tiles);
+		capture.start();
+		long peak = 0;
+		for (int tick = 0; tick < 2000; tick++)
+		{
+			boolean load = tick % 200 == 0;
+			if (load && tick > 0)
+			{
+				Tile[][][] next = varrockTiles(varrock, tick * 100);
+				for (int p = 0; p < 4; p++) { tiles[p] = next[p]; }
+			}
+			capture.tick(load);
+			com.google.gson.JsonArray samples = new com.google.gson.JsonArray();
+			for (int a = 0; a < 25; a++)
+			{
+				com.google.gson.JsonArray sample = new com.google.gson.JsonArray();
+				sample.add("npc:" + a);
+				sample.add(3200 + (tick + a) % 40 * 0.5);
+				sample.add(3210 + a * 0.25);
+				sample.add(0);
+				sample.add(512);
+				sample.add(-1);
+				sample.add(-1);
+				sample.add(808);
+				samples.add(sample);
+			}
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", "osrs:surface");
+			payload.add("samples", samples);
+			JsonObject row = new JsonObject();
+			row.addProperty("type", "osrs.motion");
+			row.add("payload", payload);
+			file.enqueue(row, false);
+			if (tick % 500 == 499) { peak = Math.max(peak, usedHeap() - baseline); }
+		}
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		file.enqueue(new JsonObject(), true);
+		worker.submit(() -> { }).get();
+		long held = usedHeap() - baseline;
+		file.finish().get(60, java.util.concurrent.TimeUnit.SECONDS);
+		long onDisk = java.nio.file.Files.list(dir).mapToLong(path -> path.toFile().length()).sum();
+		long plain = 0;
+		try (java.io.InputStream in = new java.util.zip.GZIPInputStream(file.path().openInputStream()))
+		{
+			plain = in.transferTo(java.io.OutputStream.nullOutputStream());
+		}
+		System.out.printf("20-minute part: %s, %.1f MiB of rows, %.1f MiB gzip; heap over baseline before save %.1f MiB, peak sampled %.1f MiB%n",
+			file.state(), plain / 1048576.0, onDisk / 1048576.0, held / 1048576.0, peak / 1048576.0);
+		worker.shutdownNow();
+		java.nio.file.Files.list(dir).forEach(path -> path.toFile().delete());
+		dir.toFile().delete();
+	}
+
+	private static long usedHeap()
+	{
+		for (int i = 0; i < 4; i++) { System.gc(); }
+		Runtime runtime = Runtime.getRuntime();
+		return runtime.totalMemory() - runtime.freeMemory();
+	}
+
 	private static JsonObject payload(JsonObject row)
 	{
 		return row.has("payload") ? row.getAsJsonObject("payload") : row;
@@ -228,12 +301,17 @@ public class SceneLoadedTest
 	/** The given number of one-object tiles on each plane, a quarter of them walls, decorations and ground objects. */
 	private static Tile[][][] varrockTiles(int[] perPlane)
 	{
+		return varrockTiles(perPlane, 0);
+	}
+
+	private static Tile[][][] varrockTiles(int[] perPlane, int idOffset)
+	{
 		Tile[][][] tiles = new Tile[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE];
 		for (int plane = 0; plane < 4; plane++)
 		{
 			for (int i = 0; i < perPlane[plane]; i++)
 			{
-				int x = i % Constants.SCENE_SIZE, y = i / Constants.SCENE_SIZE, id = 1000 + i;
+				int x = i % Constants.SCENE_SIZE, y = i / Constants.SCENE_SIZE, id = 1000 + idOffset + i;
 				String getter = i % 4 == 0 ? "getGameObjects" : i % 4 == 1 ? "getWallObject" : i % 4 == 2 ? "getDecorativeObject" : "getGroundObject";
 				Map<String, Object> answers = Map.of("getId", id, "getConfig", i % 4);
 				Object object = i % 4 == 0 ? new GameObject[]{fake(GameObject.class, Map.of("getId", id, "getConfig", 10))}
@@ -257,7 +335,7 @@ public class SceneLoadedTest
 		return fake(Tile.class, answers);
 	}
 
-	private static OsrsCapture capture(Rows rows, int radius, Tile[][][] tiles)
+	private static OsrsCapture capture(Recorder rows, int radius, Tile[][][] tiles)
 	{
 		IndexedObjectSet<?> empty = fake(IndexedObjectSet.class, Map.of("iterator", Collections.emptyIterator()));
 		Scene scene = fake(Scene.class, Map.of("getTiles", tiles,

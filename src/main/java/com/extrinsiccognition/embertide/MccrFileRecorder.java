@@ -5,8 +5,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
-import java.io.IOException;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -17,7 +20,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
+import java.util.zip.ZipException;
 import net.runelite.client.util.Filepath;
 import net.runelite.client.util.LinkBrowser;
 
@@ -37,7 +42,9 @@ public final class MccrFileRecorder implements Recorder
 	private final Executor worker;
 	private final int capacity;
 	private final String unique = UUID.randomUUID().toString();
-	private final List<byte[]> held = new ArrayList<>();
+	// Rows not yet in the partial file: about a second's worth.
+	private final List<byte[]> pending = new ArrayList<>();
+	private int count;
 	private Filepath sealed;
 	private String name = "";
 	private State state = State.IDLE;
@@ -49,6 +56,7 @@ public final class MccrFileRecorder implements Recorder
 	private Filepath partial;
 	private GZIPOutputStream out;
 	private int written;
+	private boolean finished;
 	private boolean draining;
 	private long drainedAt = System.nanoTime() - FLUSH_NANOS;
 	// osrs.motion x and y as thousandths of a tile, each actor's first absolute and then its change.
@@ -90,7 +98,9 @@ public final class MccrFileRecorder implements Recorder
 	@Override
 	public synchronized boolean full() { return full; }
 
-	synchronized int retainedBytes() { return bytes; }
+	synchronized int budgetBytes() { return bytes; }
+
+	synchronized int pendingRows() { return pending.size(); }
 
 	@Override
 	public synchronized CompletableFuture<Void> open(JsonObject header)
@@ -135,12 +145,13 @@ public final class MccrFileRecorder implements Recorder
 			row = (gson.toJson(compacted) + '\n').getBytes(StandardCharsets.UTF_8);
 		}
 		if (bytes + plain > capacity - (control ? 0 : END_RESERVE)
-			|| held.size() >= MAX_RECORDS + (control ? 1 : 0))
+			|| count >= MAX_RECORDS + (control ? 1 : 0))
 		{
 			full = true;
 			return false;
 		}
-		held.add(row);
+		pending.add(row);
+		count++;
 		bytes += plain;
 		if (compacted != null)
 		{
@@ -203,14 +214,14 @@ public final class MccrFileRecorder implements Recorder
 			{
 				if (state() == State.READY)
 				{
-					writeHeld();
+					writePending();
 				}
 			}
 		}
 		catch (IOException | RuntimeException e)
 		{
-			// The save at the end starts a fresh file from every held row.
-			closeQuietly();
+			// The next drain or the save rebuilds the partial file from its readable rows.
+			closeStream();
 		}
 		finally
 		{
@@ -221,21 +232,34 @@ public final class MccrFileRecorder implements Recorder
 		}
 	}
 
-	/** Appends the rows not yet in the partial file and sync-flushes them. Called holding io. */
-	private void writeHeld() throws IOException
+	/** Appends the rows not yet on disk and sync-flushes them. Called holding io. */
+	private void writePending() throws IOException
 	{
 		if (out == null)
 		{
-			directory.createDirectories();
-			partial = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
-			out = new GZIPOutputStream(new BufferedOutputStream(
-				partial.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024), 64 * 1024, true);
-			written = 0;
+			Filepath broken = partial;
+			int kept = written;
+			openPartial();
+			if (broken != null)
+			{
+				try
+				{
+					copyRows(broken);
+				}
+				catch (IOException | RuntimeException e)
+				{
+					closeStream();
+					partial.deleteIfExists();
+					partial = broken;
+					written = kept;
+					throw e;
+				}
+			}
 		}
 		List<byte[]> rows;
 		synchronized (this)
 		{
-			rows = new ArrayList<>(held.subList(written, held.size()));
+			rows = new ArrayList<>(pending);
 		}
 		for (byte[] row : rows)
 		{
@@ -243,9 +267,68 @@ public final class MccrFileRecorder implements Recorder
 		}
 		out.flush();
 		written += rows.size();
+		synchronized (this)
+		{
+			pending.subList(0, rows.size()).clear();
+		}
 	}
 
-	private void closeQuietly()
+	private void openPartial() throws IOException
+	{
+		directory.createDirectories();
+		Filepath fresh = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
+		out = new GZIPOutputStream(new BufferedOutputStream(
+			fresh.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024), 64 * 1024, true);
+		partial = fresh;
+	}
+
+	/** Copies the rows already flushed to a broken partial file into the new one, then deletes it. */
+	private void copyRows(Filepath broken) throws IOException
+	{
+		int want = written;
+		written = 0;
+		ByteArrayOutputStream line = new ByteArrayOutputStream();
+		byte[] buffer = new byte[64 * 1024];
+		try (InputStream in = new GZIPInputStream(broken.openInputStream(), 64 * 1024))
+		{
+			int read;
+			while (written < want && (read = in.read(buffer)) > 0)
+			{
+				int from = 0;
+				for (int i = 0; i < read && written < want; i++)
+				{
+					if (buffer[i] == '\n')
+					{
+						line.write(buffer, from, i + 1 - from);
+						line.writeTo(out);
+						line.reset();
+						written++;
+						from = i + 1;
+					}
+				}
+				if (written < want)
+				{
+					line.write(buffer, from, read - from);
+				}
+			}
+		}
+		catch (EOFException | ZipException cutOff)
+		{
+			// Keep every whole row before the damage.
+		}
+		broken.deleteIfExists();
+	}
+
+	/** Closes the stream as a failed write would. */
+	void dropStream()
+	{
+		synchronized (io)
+		{
+			closeStream();
+		}
+	}
+
+	private void closeStream()
 	{
 		if (out != null)
 		{
@@ -253,13 +336,6 @@ public final class MccrFileRecorder implements Recorder
 			catch (IOException ignored) { }
 			out = null;
 		}
-		if (partial != null)
-		{
-			try { partial.deleteIfExists(); }
-			catch (IOException | RuntimeException ignored) { }
-			partial = null;
-		}
-		written = 0;
 	}
 
 	@Override
@@ -296,27 +372,30 @@ public final class MccrFileRecorder implements Recorder
 		{
 			try
 			{
-				writeHeld();
-				// The gzip trailer: a finished part is a whole gzip file.
-				out.finish();
-				out.close();
-				out = null;
+				if (!finished)
+				{
+					writePending();
+					// The gzip trailer: a finished part is a whole gzip file.
+					out.finish();
+					out.close();
+					out = null;
+					finished = true;
+				}
 				// Same-directory rename without REPLACE_EXISTING. ATOMIC_MOVE can silently
 				// replace its destination on some platforms, so do not request that option.
 				partial.moveTo(sealed);
 				partial = null;
+				finished = false;
 				written = 0;
 				synchronized (this)
 				{
-					held.clear();
-					bytes = 0;
 					state = State.COMPLETE;
 				}
 				saving.complete(null);
 			}
 			catch (IOException | RuntimeException e)
 			{
-				closeQuietly();
+				closeStream();
 				failed(e);
 			}
 		}
@@ -329,15 +408,29 @@ public final class MccrFileRecorder implements Recorder
 		saving.completeExceptionally(e);
 	}
 
-	public synchronized void discard()
+	public void discard()
 	{
-		if (state != State.FAILED)
+		synchronized (io)
 		{
-			throw new IllegalStateException("Only a failed save can be discarded.");
+			synchronized (this)
+			{
+				if (state != State.FAILED)
+				{
+					throw new IllegalStateException("Only a failed save can be discarded.");
+				}
+				pending.clear();
+				state = State.COMPLETE;
+			}
+			closeStream();
+			if (partial != null)
+			{
+				try { partial.deleteIfExists(); }
+				catch (IOException | RuntimeException ignored) { }
+				partial = null;
+			}
+			finished = false;
+			written = 0;
 		}
-		held.clear();
-		bytes = 0;
-		state = State.COMPLETE;
 	}
 
 	@Override

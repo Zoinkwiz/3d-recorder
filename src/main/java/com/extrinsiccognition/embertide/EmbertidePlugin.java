@@ -565,8 +565,8 @@ public class EmbertidePlugin extends Plugin
 			boolean recover = pending != null && pending.recorder().state() == Recorder.State.FAILED;
 			boolean resume = enabled && !stopped && (manual || continuing || config.recordOnLogin());
 			text.append(handingOff ? "Saving your recording." + (resume ? " Recording resumes after it is saved." : "")
-				: recover ? "Recording paused. The unsaved recording is still in memory.\n\n"
-					+ pending.recorder().error() + "\n\nRetry saving, or discard it. Closing RuneLite loses this unsaved recording."
+				: recover ? "Recording paused. The unsaved recording is kept as a .partial file.\n\n"
+					+ pending.recorder().error() + "\n\nRetry saving, or discard it. Closing RuneLite leaves it as a .partial file."
 				: stopped ? "Not recording." : notice);
 			boolean in = loggedIn;
 			if (!in)

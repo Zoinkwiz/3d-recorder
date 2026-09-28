@@ -82,4 +82,4 @@ session, named with the date, time and your character's name. Older
 versions saved to `~/.runelite/embertide/`; Studio and the app check both.
 Each file is gzipped JSON Lines; `gunzip -c` shows the rows. A part still
 being written is a `.partial` file that holds everything up to about a
-second ago.
+second ago; if a save fails, the plugin retries it from that file.
