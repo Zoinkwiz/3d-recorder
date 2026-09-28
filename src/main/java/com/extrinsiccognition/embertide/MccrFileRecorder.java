@@ -1,13 +1,18 @@
 package com.extrinsiccognition.embertide;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.io.BufferedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -46,6 +51,10 @@ public final class MccrFileRecorder implements Recorder
 	private int written;
 	private boolean draining;
 	private long drainedAt = System.nanoTime() - FLUSH_NANOS;
+	// osrs.motion x and y as thousandths of a tile, each actor's first absolute and then its change.
+	static final String MOTION_XY = "delta-milli";
+	private final Map<String, long[]> lastXY = new HashMap<>();
+	private boolean compact;
 
 	public MccrFileRecorder(Gson gson, Filepath directory, Supplier<String> stem, Executor worker)
 	{
@@ -94,6 +103,12 @@ public final class MccrFileRecorder implements Recorder
 		name = stem.get() + "-" + unique;
 		sealed = directory.joinSegment(name + ".embertide");
 		state = State.READY;
+		if (header.has("osrs") && header.get("osrs").isJsonObject())
+		{
+			header = header.deepCopy();
+			header.getAsJsonObject("osrs").addProperty("motion_xy", MOTION_XY);
+			compact = true;
+		}
 		if (!enqueue(header, false))
 		{
 			state = State.FAILED;
@@ -111,14 +126,26 @@ public final class MccrFileRecorder implements Recorder
 			return false;
 		}
 		byte[] row = (gson.toJson(record) + '\n').getBytes(StandardCharsets.UTF_8);
-		if (bytes + row.length > capacity - (control ? 0 : END_RESERVE)
+		// The budget counts rows as readers expand them, so the desktop's limit still holds.
+		int plain = row.length;
+		Map<String, long[]> moved = compact ? new HashMap<>() : null;
+		JsonObject compacted = moved == null ? null : compactMotion(record, moved);
+		if (compacted != null)
+		{
+			row = (gson.toJson(compacted) + '\n').getBytes(StandardCharsets.UTF_8);
+		}
+		if (bytes + plain > capacity - (control ? 0 : END_RESERVE)
 			|| held.size() >= MAX_RECORDS + (control ? 1 : 0))
 		{
 			full = true;
 			return false;
 		}
 		held.add(row);
-		bytes += row.length;
+		bytes += plain;
+		if (compacted != null)
+		{
+			lastXY.putAll(moved);
+		}
 		if (!draining && System.nanoTime() - drainedAt >= FLUSH_NANOS)
 		{
 			draining = true;
@@ -134,6 +161,39 @@ public final class MccrFileRecorder implements Recorder
 		}
 		return true;
 	}
+
+	/** A copy of an osrs.motion row with x and y as thousandths, or null for any other row. */
+	private JsonObject compactMotion(JsonObject record, Map<String, long[]> moved)
+	{
+		JsonElement type = record.get("type");
+		JsonElement payload = record.get("payload");
+		if (type == null || !"osrs.motion".equals(type.getAsString()) || payload == null || !payload.isJsonObject()
+			|| !payload.getAsJsonObject().has("samples") || !payload.getAsJsonObject().get("samples").isJsonArray())
+		{
+			return null;
+		}
+		JsonObject copy = record.deepCopy();
+		for (JsonElement element : copy.getAsJsonObject("payload").getAsJsonArray("samples"))
+		{
+			JsonArray sample = element.isJsonArray() ? element.getAsJsonArray() : null;
+			if (sample == null || sample.size() < 3 || !isString(sample.get(0)) || !isNumber(sample.get(1)) || !isNumber(sample.get(2)))
+			{
+				continue;
+			}
+			String id = sample.get(0).getAsString();
+			long x = Math.round(sample.get(1).getAsDouble() * 1000.0);
+			long y = Math.round(sample.get(2).getAsDouble() * 1000.0);
+			long[] seen = moved.containsKey(id) ? moved.get(id) : lastXY.get(id);
+			sample.set(1, new JsonPrimitive(seen == null ? x : x - seen[0]));
+			sample.set(2, new JsonPrimitive(seen == null ? y : y - seen[1]));
+			moved.put(id, new long[]{x, y});
+		}
+		return copy;
+	}
+
+	private static boolean isString(JsonElement e) { return e.isJsonPrimitive() && e.getAsJsonPrimitive().isString(); }
+
+	private static boolean isNumber(JsonElement e) { return e.isJsonPrimitive() && e.getAsJsonPrimitive().isNumber(); }
 
 	private void drain()
 	{

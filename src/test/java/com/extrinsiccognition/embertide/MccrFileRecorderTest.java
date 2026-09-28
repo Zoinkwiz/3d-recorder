@@ -1,6 +1,7 @@
 package com.extrinsiccognition.embertide;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -11,7 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +93,81 @@ public class MccrFileRecorderTest
 		List<String> prefix = lines(Arrays.copyOf(bytes, bytes.length / 2));
 		assertTrue(prefix.size() > 1);
 		assertEquals(rows.subList(0, prefix.size()), prefix);
+	}
+
+	@Test
+	public void writesMotionAsThousandthDeltasThatExpandExactly() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		JsonObject header = new JsonObject();
+		header.addProperty("type", "mccr.header");
+		JsonObject osrs = new JsonObject();
+		osrs.addProperty("profile", "ec.mccr.osrs/5");
+		header.add("osrs", osrs);
+		recorder.open(header).get();
+		assertTrue(!osrs.has("motion_xy"));
+		List<JsonObject> sent = new ArrayList<>();
+		for (int i = 0; i < 200; i++)
+		{
+			JsonArray samples = new JsonArray();
+			samples.add(sample("player", 3222.5 + i * 0.0078125, 3218.063 - i * 0.047));
+			if (i % 3 == 0)
+			{
+				samples.add(sample("npc:cow#" + (i % 2), 3200 + (i % 7) * 0.125, 3199.5));
+			}
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", "osrs:surface");
+			payload.add("samples", samples);
+			JsonObject row = new JsonObject();
+			row.addProperty("type", "osrs.motion");
+			row.add("payload", payload);
+			String before = gson.toJson(row);
+			assertTrue(recorder.enqueue(row, false));
+			assertEquals(before, gson.toJson(row));
+			sent.add(row);
+		}
+		recorder.finish().get(10, TimeUnit.SECONDS);
+		List<String> lines = lines(Files.readAllBytes(sealed()));
+		JsonObject written = gson.fromJson(lines.get(0), JsonObject.class);
+		assertEquals("delta-milli", written.getAsJsonObject("osrs").get("motion_xy").getAsString());
+		Map<String, long[]> last = new HashMap<>();
+		for (int r = 0; r < sent.size(); r++)
+		{
+			JsonArray got = gson.fromJson(lines.get(r + 1), JsonObject.class).getAsJsonObject("payload").getAsJsonArray("samples");
+			JsonArray want = sent.get(r).getAsJsonObject("payload").getAsJsonArray("samples");
+			assertEquals(want.size(), got.size());
+			for (int k = 0; k < want.size(); k++)
+			{
+				JsonArray g = got.get(k).getAsJsonArray(), w = want.get(k).getAsJsonArray();
+				String id = g.get(0).getAsString();
+				long[] seen = last.get(id);
+				long x = g.get(1).getAsLong() + (seen == null ? 0 : seen[0]), y = g.get(2).getAsLong() + (seen == null ? 0 : seen[1]);
+				last.put(id, new long[]{x, y});
+				assertEquals(w.get(1).getAsDouble(), x / 1000.0, 0.0);
+				assertEquals(w.get(2).getAsDouble(), y / 1000.0, 0.0);
+				for (int f = 3; f < w.size(); f++)
+				{
+					assertEquals(w.get(f), g.get(f));
+				}
+			}
+		}
+		// Kept for the app's reader to check against (build/ is not tracked).
+		Files.createDirectories(Path.of("build"));
+		Files.copy(sealed(), Path.of("build", "compact-sample.embertide"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+	}
+
+	private static JsonArray sample(String id, double x, double y)
+	{
+		JsonArray sample = new JsonArray();
+		sample.add(id);
+		sample.add(Math.round(x * 1000.0) / 1000.0);
+		sample.add(Math.round(y * 1000.0) / 1000.0);
+		sample.add(0);
+		sample.add(512);
+		sample.add(-1);
+		sample.add(-1);
+		sample.add(808);
+		return sample;
 	}
 
 	private MccrFileRecorder recorder()
