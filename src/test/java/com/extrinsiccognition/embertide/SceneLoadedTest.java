@@ -16,9 +16,11 @@ import net.runelite.api.DecorativeObject;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
 import net.runelite.api.IndexedObjectSet;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
+import net.runelite.api.TileItem;
 import net.runelite.api.WallObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
@@ -32,28 +34,95 @@ public class SceneLoadedTest
 	private static final int BASE_Y = 3168;
 
 	@Test
-	public void writesTheWholeRadiusInTheFirstTick()
+	public void writesTheWholeSceneInTheFirstTick()
 	{
 		Rows rows = new Rows();
 		OsrsCapture capture = capture(rows, 12, 1);
 		capture.start();
 		assertTrue(capture.tick(true));
-		int tiles = discTiles(12);
-		assertEquals(2 * tiles, count(rows, "mccr.spatial_snapshot", "cells"));
+		int tiles = Constants.SCENE_SIZE * Constants.SCENE_SIZE;
+		assertEquals(2 * discTiles(12), count(rows, "mccr.spatial_snapshot", "cells"));
 		assertEquals(tiles, count(rows, "osrs.object", "objects"));
 		JsonObject last = rows.list.get(rows.list.size() - 1);
 		assertEquals("osrs.scene_loaded", last.get("type").getAsString());
 		JsonObject marker = payload(last);
 		assertEquals(42, marker.get("tick").getAsInt());
 		assertEquals(BASE_X, marker.get("base_x").getAsInt());
+		assertEquals("scene", marker.get("scope").getAsString());
+		assertEquals(4, marker.getAsJsonArray("planes").size());
 		assertEquals(new WorldPoint(3222, 3218, 0).getRegionID(), marker.get("region").getAsInt());
-		assertEquals(2 * tiles, marker.getAsJsonObject("counts").get("cells").getAsInt());
+		assertEquals(2 * discTiles(12), marker.getAsJsonObject("counts").get("cells").getAsInt());
 		assertEquals(tiles, marker.getAsJsonObject("counts").get("objects").getAsInt());
 
 		int before = rows.list.size();
 		capture.tick(false);
 		assertEquals(0, rows.list.subList(before, rows.list.size()).stream()
 			.filter(row -> row.get("type").getAsString().equals("osrs.scene_loaded")).count());
+	}
+
+	@Test
+	public void aReloadWritesOnlyWhatChanged()
+	{
+		Map<String, Object> door = new HashMap<>(Map.of("getId", 5, "getConfig", 0));
+		Tile[][][] tiles = tiles(1);
+		Rows rows = new Rows();
+		OsrsCapture capture = capture(rows, 4, tiles);
+		tiles[2][60][70] = fake(Tile.class, Map.of("getWallObject", fake(WallObject.class, door)));
+		capture.start();
+		capture.tick(true);
+		int before = rows.list.size();
+		capture.tick(true);
+		assertEquals(0, count(rows.list.subList(before, rows.list.size()), "osrs.object", "objects"));
+
+		door.put("getConfig", 1 << 6);
+		tiles[2][60][70] = fake(Tile.class, Map.of("getWallObject", fake(WallObject.class, door)));
+		before = rows.list.size();
+		capture.tick(true);
+		List<JsonObject> reload = rows.list.subList(before, rows.list.size());
+		JsonObject gone = payload(reload.stream().filter(row -> row.get("type").getAsString().equals("osrs.object")).findFirst().get());
+		assertEquals("despawned", gone.get("scope").getAsString());
+		assertEquals(0, gone.getAsJsonArray("objects").get(0).getAsJsonObject().get("orientation").getAsInt());
+		assertEquals(1, count(reload, "osrs.object", "objects") - 1);
+		JsonObject marker = payload(reload.get(reload.size() - 1));
+		assertEquals(1, marker.getAsJsonObject("counts").get("objects").getAsInt());
+		assertEquals(1, marker.getAsJsonObject("counts").get("removed").getAsInt());
+	}
+
+	@Test
+	public void writesTransitionsAnywhereInTheSceneOnce()
+	{
+		Rows rows = new Rows();
+		OsrsCapture capture = capture(rows, 4, 1);
+		capture.start();
+		capture.tick(true);
+		Tile far = fake(Tile.class, Map.of("getWorldLocation", new WorldPoint(BASE_X + 100, BASE_Y + 3, 2)));
+		GameObject fire = fake(GameObject.class, Map.of("getId", 26185, "getConfig", 10));
+		int before = rows.list.size();
+		capture.objectChanged(far, fire, true);
+		capture.objectChanged(far, fire, true);
+		capture.objectChanged(far, fire, false);
+		capture.objectChanged(far, fire, false);
+		List<JsonObject> written = rows.list.subList(before, rows.list.size());
+		assertEquals(2, written.size());
+		assertEquals("spawned", payload(written.get(0)).get("scope").getAsString());
+		assertEquals("despawned", payload(written.get(1)).get("scope").getAsString());
+		assertEquals(2, payload(written.get(0)).getAsJsonArray("objects").get(0).getAsJsonObject().get("plane").getAsInt());
+	}
+
+	@Test
+	public void writesTheScenesGroundItems()
+	{
+		Tile[][][] tiles = tiles(0);
+		TileItem bones = fake(TileItem.class, Map.of("getId", 526, "getQuantity", 1));
+		tiles[0][10][20] = fake(Tile.class, Map.of("getGroundItems", List.of(bones)));
+		Rows rows = new Rows();
+		OsrsCapture capture = capture(rows, 4, tiles);
+		capture.start();
+		capture.tick(true);
+		JsonObject items = payload(rows.list.stream().filter(row -> row.get("type").getAsString().equals("osrs.ground_items")).findFirst().get());
+		assertEquals("scene", items.get("scope").getAsString());
+		assertEquals(BASE_X, items.get("base_x").getAsInt());
+		assertEquals("[" + (BASE_X + 10) + "," + (BASE_Y + 20) + ",0,526,1]", items.getAsJsonArray("items").get(0).toString());
 	}
 
 	@Test
@@ -71,21 +140,42 @@ public class SceneLoadedTest
 		assertEquals("HOPPING", payload(last).get("state").getAsString());
 	}
 
-	/** Cost of the plugin's own work for a dense first tick; prints, does not assert a time. */
+	/**
+	 * Client-thread cost of a Varrock-sized first tick (the cache's 17,093 locs on four planes) and of
+	 * the same scene loaded again unchanged, then the file recorder's gzip write of its rows off-thread.
+	 * Prints; does not assert a time.
+	 */
 	@Test
-	public void firstTickCost()
+	public void firstTickCost() throws Exception
 	{
-		for (int round = 0; round < 10; round++)
+		int[] varrock = {10275, 3796, 2066, 956};
+		for (int round = 0; round < 8; round++)
 		{
-			int radius = round % 2 == 0 ? 12 : 26;
 			Rows rows = new Rows();
-			OsrsCapture capture = capture(rows, radius, radius == 12 ? 1 : 4);
+			OsrsCapture capture = capture(rows, 12, varrockTiles(varrock));
 			capture.start();
 			long began = System.nanoTime();
 			capture.tick(true);
-			long spent = System.nanoTime() - began;
-			System.out.printf("first tick, radius %d, %d objects, %d cells, %d bytes: %.1f ms%n",
-				radius, count(rows, "osrs.object", "objects"), count(rows, "mccr.spatial_snapshot", "cells"), rows.bytes, spent / 1e6);
+			long first = System.nanoTime() - began;
+			began = System.nanoTime();
+			capture.tick(true);
+			long again = System.nanoTime() - began;
+			java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("scene-cost");
+			java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+			MccrFileRecorder file = new MccrFileRecorder(new com.google.gson.Gson(), net.runelite.client.util.Filepath.Unchecked.getRooted(dir), () -> "osrs-cost", worker);
+			JsonObject header = new JsonObject();
+			header.addProperty("type", "mccr.header");
+			file.open(header);
+			for (JsonObject row : rows.list) { file.enqueue(row, false); }
+			began = System.nanoTime();
+			file.finish().get(30, java.util.concurrent.TimeUnit.SECONDS);
+			long write = System.nanoTime() - began;
+			long onDisk = java.nio.file.Files.list(dir).mapToLong(path -> path.toFile().length()).sum();
+			worker.shutdownNow();
+			java.nio.file.Files.list(dir).forEach(path -> path.toFile().delete());
+			dir.toFile().delete();
+			System.out.printf("round %d: %d objects, %d rows, %d bytes (%d gzip): first tick %.1f ms, unchanged reload %.1f ms, gzip write %.1f ms%n",
+				round, count(rows.list, "osrs.object", "objects"), rows.list.size(), rows.bytes, onDisk, first / 1e6, again / 1e6, write / 1e6);
 		}
 	}
 
@@ -96,8 +186,13 @@ public class SceneLoadedTest
 
 	private static int count(Rows rows, String type, String field)
 	{
+		return count(rows.list, type, field);
+	}
+
+	private static int count(List<JsonObject> list, String type, String field)
+	{
 		int total = 0;
-		for (JsonObject row : rows.list)
+		for (JsonObject row : list)
 		{
 			if (row.get("type").getAsString().equals(type)) { total += payload(row).getAsJsonArray(field).size(); }
 		}
@@ -113,23 +208,57 @@ public class SceneLoadedTest
 
 	private static OsrsCapture capture(Rows rows, int radius, int objectsPerTile)
 	{
+		return capture(rows, radius, tiles(objectsPerTile));
+	}
+
+	/** Plane 0 filled, one game object a tile (or all four kinds), the upper planes empty. */
+	private static Tile[][][] tiles(int objectsPerTile)
+	{
 		Tile[][][] tiles = new Tile[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE];
-		for (int x = 0; x < Constants.SCENE_SIZE; x++)
+		for (int x = 0; x < Constants.SCENE_SIZE && objectsPerTile > 0; x++)
 		{
 			for (int y = 0; y < Constants.SCENE_SIZE; y++)
 			{
-				int id = 1000 + x * Constants.SCENE_SIZE + y;
-				Map<String, Object> answers = new HashMap<>();
-				answers.put("getGameObjects", new GameObject[]{fake(GameObject.class, Map.of("getId", id, "getConfig", 10 << 0))});
-				if (objectsPerTile > 1)
-				{
-					answers.put("getWallObject", fake(WallObject.class, Map.of("getId", id + 1)));
-					answers.put("getGroundObject", fake(GroundObject.class, Map.of("getId", id + 2)));
-					answers.put("getDecorativeObject", fake(DecorativeObject.class, Map.of("getId", id + 3)));
-				}
-				tiles[0][x][y] = fake(Tile.class, answers);
+				tiles[0][x][y] = tile(1000 + x * Constants.SCENE_SIZE + y, objectsPerTile);
 			}
 		}
+		return tiles;
+	}
+
+	/** The given number of one-object tiles on each plane, a quarter of them walls, decorations and ground objects. */
+	private static Tile[][][] varrockTiles(int[] perPlane)
+	{
+		Tile[][][] tiles = new Tile[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE];
+		for (int plane = 0; plane < 4; plane++)
+		{
+			for (int i = 0; i < perPlane[plane]; i++)
+			{
+				int x = i % Constants.SCENE_SIZE, y = i / Constants.SCENE_SIZE, id = 1000 + i;
+				String getter = i % 4 == 0 ? "getGameObjects" : i % 4 == 1 ? "getWallObject" : i % 4 == 2 ? "getDecorativeObject" : "getGroundObject";
+				Map<String, Object> answers = Map.of("getId", id, "getConfig", i % 4);
+				Object object = i % 4 == 0 ? new GameObject[]{fake(GameObject.class, Map.of("getId", id, "getConfig", 10))}
+					: i % 4 == 1 ? fake(WallObject.class, answers) : i % 4 == 2 ? fake(DecorativeObject.class, answers) : fake(GroundObject.class, answers);
+				tiles[plane][x][y] = fake(Tile.class, Map.of(getter, object));
+			}
+		}
+		return tiles;
+	}
+
+	private static Tile tile(int id, int objectsPerTile)
+	{
+		Map<String, Object> answers = new HashMap<>();
+		answers.put("getGameObjects", new GameObject[]{fake(GameObject.class, Map.of("getId", id, "getConfig", 10 << 0))});
+		if (objectsPerTile > 1)
+		{
+			answers.put("getWallObject", fake(WallObject.class, Map.of("getId", id + 1)));
+			answers.put("getGroundObject", fake(GroundObject.class, Map.of("getId", id + 2)));
+			answers.put("getDecorativeObject", fake(DecorativeObject.class, Map.of("getId", id + 3)));
+		}
+		return fake(Tile.class, answers);
+	}
+
+	private static OsrsCapture capture(Rows rows, int radius, Tile[][][] tiles)
+	{
 		IndexedObjectSet<?> empty = fake(IndexedObjectSet.class, Map.of("iterator", Collections.emptyIterator()));
 		Scene scene = fake(Scene.class, Map.of("getTiles", tiles,
 			"getOverlayIds", new short[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE],
@@ -138,7 +267,8 @@ public class SceneLoadedTest
 			"getMapRegions", new int[]{12850}, "getTileHeights", new int[4][Constants.SCENE_SIZE + 1][Constants.SCENE_SIZE + 1],
 			"npcs", empty, "players", empty));
 		Player me = fake(Player.class, Map.of("getWorldLocation", new WorldPoint(3222, 3218, 0), "getName", "Tester"));
-		Client client = fake(Client.class, Map.of("getTopLevelWorldView", view, "getLocalPlayer", me, "getTickCount", 42));
+		ObjectComposition plain = fake(ObjectComposition.class, Map.of());
+		Client client = fake(Client.class, Map.of("getTopLevelWorldView", view, "getLocalPlayer", me, "getTickCount", 42, "getObjectDefinition", plain));
 		EmbertideConfig config = fake(EmbertideConfig.class, Map.of("captureRadius", radius));
 		return new OsrsCapture(client, rows, config, "osrs:surface", "Tester", 301);
 	}

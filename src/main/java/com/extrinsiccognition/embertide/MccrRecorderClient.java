@@ -33,7 +33,8 @@ public final class MccrRecorderClient implements Recorder
 	}
 
 	static final int MAX_BATCH_BYTES = 256 * 1024;
-	static final int MAX_PENDING_BYTES = 2 * 1024 * 1024;
+	// A whole scene load (up to about 1.5 MB in a city) is written in one tick.
+	static final int MAX_PENDING_BYTES = 8 * 1024 * 1024;
 	static final int MAX_BATCH_RECORDS = 256;
 	static final long FLUSH_MS = 250;
 	static final long RETRY_BUDGET_MS = 30_000;

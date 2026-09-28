@@ -439,6 +439,22 @@ public class EmbertidePlugin extends Plugin
 		objectChanged(event.getTile(), event.getDecorativeObject(), false);
 	}
 
+	@Subscribe
+	public void onItemSpawned(net.runelite.api.events.ItemSpawned event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
+		current.itemChanged(event.getTile(), event.getItem(), true);
+	}
+
+	@Subscribe
+	public void onItemDespawned(net.runelite.api.events.ItemDespawned event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
+		current.itemChanged(event.getTile(), event.getItem(), false);
+	}
+
 	private void objectChanged(net.runelite.api.Tile tile, net.runelite.api.TileObject object, boolean spawned)
 	{
 		OsrsCapture current = capture;

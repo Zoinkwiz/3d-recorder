@@ -14,7 +14,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "captureRadius",
 		name = "Capture radius",
-		description = "How far around you the ground and objects are recorded. People are always recorded wherever the game shows them. Bigger areas make bigger files.",
+		description = "How far around you the ground is sampled for the block view. Objects, ground items and people are recorded across the whole area the game has loaded.",
 		position = 1
 	)
 	@Range(min = 4, max = 26)

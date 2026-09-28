@@ -24,8 +24,8 @@ import net.runelite.client.util.LinkBrowser;
 public final class MccrFileRecorder implements Recorder
 {
 	public static final String STUDIO_URL = "https://embertide.gg/studio/";
-	// The desktop's 64 MiB archive also includes ingest checkpoints and links.
-	static final int MAX_BYTES = 60 * 1024 * 1024;
+	// The desktop's 128 MiB archive also includes ingest checkpoints and links.
+	static final int MAX_BYTES = 120 * 1024 * 1024;
 	static final int END_RESERVE = 16 * 1024;
 	// The desktop importer accepts 120,000 records plus a header.
 	static final int MAX_RECORDS = 120_000;
