@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.io.BufferedOutputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -13,6 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
+import java.util.zip.GZIPOutputStream;
 import net.runelite.client.util.Filepath;
 import net.runelite.client.util.LinkBrowser;
 
@@ -24,6 +24,8 @@ public final class MccrFileRecorder implements Recorder
 	static final int END_RESERVE = 16 * 1024;
 	// The desktop importer accepts 120,000 records plus a header.
 	static final int MAX_RECORDS = 120_000;
+	// Rows reach the partial file about once a second, so a crash leaves a readable prefix.
+	static final long FLUSH_NANOS = 1_000_000_000L;
 	private final Gson gson;
 	private final Filepath directory;
 	private final Supplier<String> stem;
@@ -38,6 +40,12 @@ public final class MccrFileRecorder implements Recorder
 	private int bytes;
 	private boolean full;
 	private CompletableFuture<Void> saving;
+	private final Object io = new Object();
+	private Filepath partial;
+	private GZIPOutputStream out;
+	private int written;
+	private boolean draining;
+	private long drainedAt = System.nanoTime() - FLUSH_NANOS;
 
 	public MccrFileRecorder(Gson gson, Filepath directory, Supplier<String> stem, Executor worker)
 	{
@@ -111,7 +119,87 @@ public final class MccrFileRecorder implements Recorder
 		}
 		held.add(row);
 		bytes += row.length;
+		if (!draining && System.nanoTime() - drainedAt >= FLUSH_NANOS)
+		{
+			draining = true;
+			drainedAt = System.nanoTime();
+			try
+			{
+				worker.execute(this::drain);
+			}
+			catch (RuntimeException e)
+			{
+				draining = false;
+			}
+		}
 		return true;
+	}
+
+	private void drain()
+	{
+		try
+		{
+			synchronized (io)
+			{
+				if (state() == State.READY)
+				{
+					writeHeld();
+				}
+			}
+		}
+		catch (IOException | RuntimeException e)
+		{
+			// The save at the end starts a fresh file from every held row.
+			closeQuietly();
+		}
+		finally
+		{
+			synchronized (this)
+			{
+				draining = false;
+			}
+		}
+	}
+
+	/** Appends the rows not yet in the partial file and sync-flushes them. Called holding io. */
+	private void writeHeld() throws IOException
+	{
+		if (out == null)
+		{
+			directory.createDirectories();
+			partial = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
+			out = new GZIPOutputStream(new BufferedOutputStream(
+				partial.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024), 64 * 1024, true);
+			written = 0;
+		}
+		List<byte[]> rows;
+		synchronized (this)
+		{
+			rows = new ArrayList<>(held.subList(written, held.size()));
+		}
+		for (byte[] row : rows)
+		{
+			out.write(row);
+		}
+		out.flush();
+		written += rows.size();
+	}
+
+	private void closeQuietly()
+	{
+		if (out != null)
+		{
+			try { out.close(); }
+			catch (IOException ignored) { }
+			out = null;
+		}
+		if (partial != null)
+		{
+			try { partial.deleteIfExists(); }
+			catch (IOException | RuntimeException ignored) { }
+			partial = null;
+		}
+		written = 0;
 	}
 
 	@Override
@@ -144,39 +232,33 @@ public final class MccrFileRecorder implements Recorder
 
 	private void write()
 	{
-		Filepath partial = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
-		boolean owned = false;
-		try
+		synchronized (io)
 		{
-			directory.createDirectories();
-			try (OutputStream out = new BufferedOutputStream(
-				partial.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024))
+			try
 			{
-				owned = true;
-				for (byte[] row : held)
+				writeHeld();
+				// The gzip trailer: a finished part is a whole gzip file.
+				out.finish();
+				out.close();
+				out = null;
+				// Same-directory rename without REPLACE_EXISTING. ATOMIC_MOVE can silently
+				// replace its destination on some platforms, so do not request that option.
+				partial.moveTo(sealed);
+				partial = null;
+				written = 0;
+				synchronized (this)
 				{
-					out.write(row);
+					held.clear();
+					bytes = 0;
+					state = State.COMPLETE;
 				}
+				saving.complete(null);
 			}
-			// Same-directory rename without REPLACE_EXISTING. ATOMIC_MOVE can silently
-			// replace its destination on some platforms, so do not request that option.
-			partial.moveTo(sealed);
-			synchronized (this)
+			catch (IOException | RuntimeException e)
 			{
-				held.clear();
-				bytes = 0;
-				state = State.COMPLETE;
+				closeQuietly();
+				failed(e);
 			}
-			saving.complete(null);
-		}
-		catch (IOException | RuntimeException e)
-		{
-			if (owned)
-			{
-				try { partial.deleteIfExists(); }
-				catch (IOException | RuntimeException cleanup) { e.addSuppressed(cleanup); }
-			}
-			failed(e);
 		}
 	}
 
