@@ -526,7 +526,7 @@ public final class OsrsCapture
 		payload.addProperty("scope", "recording");
 		payload.addProperty("dimension", session.dimension);
 		emit("mccr.capture_start", session.time(), payload, PLAYER, false);
-		statusLine = "Recording in memory";
+		statusLine = "Recording";
 	}
 
 	/**
