@@ -3,7 +3,6 @@ package com.extrinsiccognition.embertide;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
-import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(EmbertideConfig.GROUP)
@@ -13,8 +12,8 @@ public interface EmbertideConfig extends Config
 
 	@ConfigItem(
 		keyName = "captureRadius",
-		name = "Capture radius",
-		description = "How far around you the ground and objects are recorded. People are always recorded wherever the game shows them. Bigger areas make bigger files.",
+		name = "Ground radius",
+		description = "How many tiles around you the ground is recorded for the block view. Bigger means bigger files.",
 		position = 1
 	)
 	@Range(min = 4, max = 26)
@@ -25,8 +24,8 @@ public interface EmbertideConfig extends Config
 
 	@ConfigItem(
 		keyName = "trackNpcs",
-		name = "Record nearby NPCs",
-		description = "Include NPCs in the replay: where they were, what they looked like, the fights. Off means no NPCs at all.",
+		name = "Record NPCs",
+		description = "Record NPCs: where they go, what they look like and their fights.",
 		position = 2
 	)
 	default boolean trackNpcs()
@@ -36,8 +35,8 @@ public interface EmbertideConfig extends Config
 
 	@ConfigItem(
 		keyName = "trackPlayers",
-		name = "Record nearby players",
-		description = "Include other players in the replay: where they were, what they wore, the fights. They appear as unnamed figures, and the plugin doesn't read their names or chat. Off means no other players at all.",
+		name = "Record other players",
+		description = "Record other players as unnamed figures: where they go, what they wear and their fights. Their names and chat are never read.",
 		position = 3
 	)
 	default boolean trackPlayers()
@@ -47,8 +46,8 @@ public interface EmbertideConfig extends Config
 
 	@ConfigItem(
 		keyName = "recordOverheadText",
-		name = "Record what NPCs say overhead",
-		description = "Include what NPCs say above their heads. This doesn't cover other players, whose chat the plugin doesn't read.",
+		name = "Record NPC overhead text",
+		description = "Record what NPCs say above their heads.",
 		position = 4
 	)
 	default boolean recordOverheadText()
@@ -59,8 +58,8 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOwnChat",
 		name = "Record your public chat",
-		description = "Include your own public chat in the replay. Only yours, and only public: the plugin doesn't read private, clan or friends chat, or anything other players say.",
-		position = 8
+		description = "Record your own public chat. Private, clan and friends chat, and other players' chat, are never read.",
+		position = 5
 	)
 	default boolean recordOwnChat()
 	{
@@ -70,8 +69,8 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordMoments",
 		name = "Record drops and milestones",
-		description = "Mark the big moments in the replay: the loot you get and the game's own messages for kill counts, pets, collection log, clues, tasks, quests and diaries. Only item ids, values and the kind of milestone with its count or name are kept, never the chat text.",
-		position = 9
+		description = "Record your loot and milestones like kill counts, pets, collection log slots and quests, so Studio can find your best moments.",
+		position = 6
 	)
 	default boolean recordMoments()
 	{
@@ -80,9 +79,9 @@ public interface EmbertideConfig extends Config
 
 	@ConfigItem(
 		keyName = "recordOnLogin",
-		name = "Start recording when you log in",
-		description = "Start recording as soon as you're in the world. Turn it off if you'd rather press Start yourself.",
-		position = 5
+		name = "Record when you log in",
+		description = "Start recording when you log in. Turn off to start it yourself from the side panel.",
+		position = 7
 	)
 	default boolean recordOnLogin()
 	{
@@ -92,8 +91,8 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "chunkMinutes",
 		name = "Minutes per file",
-		description = "How often your session is saved. Lower means less is lost if the client crashes. Studio shows the whole session as one recording either way.",
-		position = 7
+		description = "Long sessions are saved as one file per this many minutes. Studio shows them as one recording.",
+		position = 8
 	)
 	@Range(min = 1, max = 20)
 	default int chunkMinutes()
@@ -104,12 +103,11 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
-		description = "Open Studio in your browser when you log out, ready to drag your recording into.",
-		position = 6
+		description = "Open Studio in your browser when you log out, ready for you to drag your recording in.",
+		position = 9
 	)
 	default boolean openStudioOnLogout()
 	{
 		return false;
 	}
-
 }
