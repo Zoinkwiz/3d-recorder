@@ -65,6 +65,15 @@ Your own public chat and what NPCs say overhead are recorded by default.
 You can turn either off in the settings, along with NPCs and other players
 altogether.
 
+Your drops and milestones are recorded by default too, so Studio can find
+the big moments: the loot you get, as item ids, amounts and Grand Exchange
+values, and the game's own messages for kill counts, personal bests, pets,
+collection log slots, clues, combat tasks, Slayer tasks, quests and
+diaries. Only a fixed list of those messages is read, and only the kind of
+milestone and its numbers or names are kept, never the chat text. Loot from
+another player keeps no name. Turn off **Record drops and milestones** to
+leave all of it out.
+
 Each part of a session is written in one go when it ends, whether that's
 the regular save every few minutes, pressing Stop, logging out or closing
 the client. In between, it sits in memory. So there's no file slowly

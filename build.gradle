@@ -19,8 +19,7 @@ repositories {
 	mavenCentral()
 }
 
-// Filepath requires RuneLite 1.12.39 or later.
-def runeLiteVersion = findProperty('runeliteVersion') ?: '1.12.39-SNAPSHOT'
+def runeLiteVersion = findProperty('runeliteVersion') ?: 'latest.release'
 def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
 
 dependencies {
@@ -30,7 +29,7 @@ dependencies {
 	annotationProcessor 'org.projectlombok:lombok:1.18.30'
 	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
 	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
-	testImplementation 'junit:junit:4.12'
+	testImplementation 'junit:junit:4.13.2'
 }
 
 group = 'com.extrinsiccognition'
