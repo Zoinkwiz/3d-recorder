@@ -78,8 +78,7 @@ or account. It only records what's on your screen.
 ## Where the recordings are
 
 `~/.runelite/plugin-data/embertide/`, one `.embertide` file per part of a
-session, named with the date, time and your character's name. Older
-versions saved to `~/.runelite/embertide/`; Studio and the app check both.
+session, named with the date, time and your character's name.
 Each file is gzipped JSON Lines; `gunzip -c` shows the rows. A part still
 being written is a `.partial` file that holds everything up to about a
 second ago; if a save fails, the plugin retries it from that file.
