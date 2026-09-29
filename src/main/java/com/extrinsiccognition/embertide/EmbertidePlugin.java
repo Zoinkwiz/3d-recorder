@@ -245,58 +245,22 @@ public class EmbertidePlugin extends Plugin
 		{
 			return;
 		}
-		long began = System.nanoTime();
 		boolean opening = rediscover;
 		current.tick(rediscover);
 		rediscover = false;
-		long spent = System.nanoTime() - began;
-		long tookMs = spent / 1_000_000L;
-		gameTickNanos += spent;
-		if (opening || tookMs > 50)
-		{
-			log.debug("embertide game tick took {} ms ({}; {} client ticks since the last)", tookMs, opening ? "opening" : "steady", clientTicks);
-		}
-		clientTicks = 0;
-		tally();
 		if (opening)
 		{
 			current.clientTick();
 		}
 	}
 
-	private int clientTicks;
-	private long gameTickNanos;
-	private long clientTickNanos;
-	private long tallySince = System.nanoTime();
-
-	private void tally()
-	{
-		long now = System.nanoTime();
-		long wall = now - tallySince;
-		if (wall < 10_000_000_000L)
-		{
-			return;
-		}
-		OsrsCapture current = capture;
-		log.debug("embertide cost over {} s: game ticks {} ms, client ticks {} ms, {}% of one core{}",
-			wall / 1_000_000_000L, gameTickNanos / 1_000_000L, clientTickNanos / 1_000_000L,
-			(gameTickNanos + clientTickNanos) * 100L / wall,
-			current == null ? "" : "; " + current.status());
-		gameTickNanos = 0;
-		clientTickNanos = 0;
-		tallySince = now;
-	}
-
 	@Subscribe
 	public void onClientTick(ClientTick event)
 	{
 		OsrsCapture current = capture;
-		clientTicks++;
 		if (current != null && current.recording() && !rediscover && client.getGameState() == GameState.LOGGED_IN)
 		{
-			long began = System.nanoTime();
 			current.clientTick();
-			clientTickNanos += System.nanoTime() - began;
 		}
 	}
 
