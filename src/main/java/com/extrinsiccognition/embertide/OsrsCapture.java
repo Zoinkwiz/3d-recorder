@@ -177,7 +177,8 @@ public final class OsrsCapture
 	private int[] lastCamera;
 	private int[] lastVitals;
 	private int cameraCount;
-	private static final int MAX_CAMERA = 120_000;
+	// Camera rows land on every change, roughly ten a second while turning.
+	private static final int MAX_CAMERA = 4_000_000;
 	private int speechCount;
 	private static final int MAX_SPEECH = 600;
 	private final Map<String, String> lastSaid = new HashMap<>();
@@ -860,7 +861,7 @@ public final class OsrsCapture
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
 			+ "osrs.scene_loaded once the whole scene is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
-			+ "player.position carries osrs.interacting, the id of the actor the player is targeting; "
+			+ "osrs.poses entries end with the id of the actor each one is targeting (\"player\" for the local player) or null, and player.position carries osrs.interacting the same way; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
@@ -1553,7 +1554,7 @@ public final class OsrsCapture
 	}
 
 	/** osrs.poses entry: [id, x, y, plane, height, orientation, animation, pose animation, frame, graphic,
-	 * npc id, graphic height, client slot, logical height, health ratio, health scale]. Append only. */
+	 * npc id, graphic height, client slot, logical height, health ratio, health scale, interacting]. Append only. */
 	private void crowdPose(JsonArray crowd, WorldView view, Actor actor, String id, WorldPoint at, int npcId)
 	{
 		int height = tileHeight(view, at);
@@ -1576,6 +1577,7 @@ public final class OsrsCapture
 		entry.add(actor.getLogicalHeight());
 		entry.add(actor.getHealthRatio());
 		entry.add(actor.getHealthScale());
+		entry.add(interactingId(actor, client.getLocalPlayer()));
 		crowd.add(entry);
 	}
 
