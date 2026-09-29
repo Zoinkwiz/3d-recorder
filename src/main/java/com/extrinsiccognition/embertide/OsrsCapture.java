@@ -28,6 +28,7 @@ import net.runelite.api.PlayerComposition;
 import net.runelite.api.Scene;
 import net.runelite.api.Skill;
 import net.runelite.api.Tile;
+import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
 import net.runelite.api.WorldView;
@@ -41,8 +42,10 @@ public final class OsrsCapture
 {
 	public static final String OSRS_PROFILE = "ec.mccr.osrs/6";
 	public static final int MAX_CELLS = 40_000;
-	public static final int MAX_SURFACE_REGIONS = 64;
-	public static final int MAX_OBJECTS = 40_000;
+	public static final int MAX_SURFACE_REGIONS = 160;
+	public static final int MAX_SCENE_OBJECTS = 40_000;
+	public static final int MAX_SCENE_ITEMS = 10_000;
+	public static final int MAX_OBJECT_EVENTS = 50_000;
 	public static final int MAX_POSES = 800_000;
 	public static final int MAX_EVENTS = 10_000;
 	public static final int MAX_NPC_ACTORS = 8192;
@@ -77,7 +80,8 @@ public final class OsrsCapture
 	private int segment;
 	private final Set<String> leftIds = new HashSet<>();
 	private final Map<Long, String> known = new HashMap<>();
-	private final Set<Long> objectTiles = new HashSet<>();
+	// Per baselined tile, the sorted signatures of the objects written for it; absent means empty.
+	private final Map<Long, long[]> sceneObjects = new HashMap<>();
 	private final Set<String> actors = new HashSet<>();
 	private final Map<String, Integer> appearance = new HashMap<>();
 	private final Map<String, Integer> shownNpc = new HashMap<>();
@@ -97,12 +101,11 @@ public final class OsrsCapture
 	private final Map<GraphicsObject, Integer> sceneGraphics = new java.util.IdentityHashMap<>();
 	private final Map<String, long[]> lastMotion = new HashMap<>();
 	private boolean cellLimit;
-	private boolean objectLimit;
+	private boolean sceneTruncated;
+	private int objectEvents;
 	private int npcActors;
 	private int playerActors;
 	private long lastPlayerCell = Long.MIN_VALUE;
-	private final java.util.ArrayDeque<int[]> pending = new java.util.ArrayDeque<>();
-	private static final int TILES_PER_TICK = 60;
 	private int[] lastRegions = new int[0];
 	private final Set<Integer> visitedRegions = new HashSet<>();
 	private boolean instanceHeightsWritten;
@@ -720,7 +723,7 @@ public final class OsrsCapture
 		actorIds.clear();
 		ownHits.clear();
 		known.clear();
-		objectTiles.clear();
+		sceneObjects.clear();
 		visitedRegions.clear();
 		lastRegions = new int[0];
 		lastPlayerCell = Long.MIN_VALUE;
@@ -758,6 +761,43 @@ public final class OsrsCapture
 		JsonObject payload = new JsonObject();
 		payload.addProperty("active", active);
 		emit("mccr.loading", session.time(), payload, PLAYER, false);
+	}
+
+	/** Marks the scene as fully written: every object and ground item in the loaded scene, this tick. */
+	JsonObject sceneLoaded(int tick, int baseX, int baseY, WorldPoint at, int cells, int[] scene, int npcs, int players)
+	{
+		JsonObject payload = new JsonObject();
+		payload.addProperty("tick", tick);
+		payload.addProperty("base_x", baseX);
+		payload.addProperty("base_y", baseY);
+		payload.addProperty("region", at.getRegionID());
+		payload.addProperty("scope", "scene");
+		payload.addProperty("size", Constants.SCENE_SIZE);
+		JsonArray planes = new JsonArray();
+		for (int p = 0; p < Constants.MAX_Z; p++) { planes.add(p); }
+		payload.add("planes", planes);
+		payload.addProperty("radius", radius);
+		JsonObject counts = new JsonObject();
+		counts.addProperty("cells", cells);
+		counts.addProperty("objects", scene[0]);
+		counts.addProperty("removed", scene[1]);
+		counts.addProperty("items", scene[2]);
+		counts.addProperty("npcs", npcs);
+		counts.addProperty("players", players);
+		payload.add("counts", counts);
+		if (scene[3] != 0) { payload.addProperty("truncated", true); }
+		payload.addProperty("dimension", session.dimension);
+		return payload;
+	}
+
+	public void gameState(String state)
+	{
+		if (!recording || armed) { return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("state", state);
+		payload.addProperty("tick", client.getTickCount());
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.game_state", session.time(), payload, PLAYER, false);
 	}
 
 	private void seedActors(WorldView view)
@@ -811,11 +851,14 @@ public final class OsrsCapture
 		osrs.addProperty("world_number", world);
 		osrs.addProperty("instance", instance);
 		osrs.addProperty("coordinates", "game world tiles: x east, y north, plane; in an instance the scene's own coordinates");
-		osrs.addProperty("records", "osrs.region on each scene load; osrs.object baselines and transitions with id, kind, type and orientation from the object config; "
+		osrs.addProperty("records", "osrs.region on each scene load; osrs.object baselines of the whole loaded scene on all planes at each scene load (only what changed for tiles already written), "
+			+ "and transitions anywhere in the loaded scene, with id, kind, type and orientation from the object config, a game object once, on its anchor tile; "
+			+ "osrs.ground_items [x, y, plane, id, quantity], scope scene (replacing the box it names), baseline, spawned or despawned; "
 			+ "osrs.appearance for players; every player.position carries osrs.{npc_id, orientation, animation, pose_animation, animation_frame, graphic}; "
 			+ "osrs.motion on the 20 ms client tick with the visible state of nearby actors as [id, x, y, plane, orientation, animation, frame, pose_animation], x and y in fractional tiles, only when changed; "
 			+ "osrs.camera independently sampled as [x, y, height, yaw, pitch, scale, viewport_width, viewport_height]; "
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
+			+ "osrs.scene_loaded once the whole scene is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
 			+ "player.position carries osrs.interacting, the id of the actor the player is targeting; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
@@ -831,8 +874,9 @@ public final class OsrsCapture
 		meta.addProperty("description", "Local client observations begin after the writer accepts recording. "
 			+ "Player and actor positions once per game tick, with each actor's facing: eligible actors in the loaded scene on the player's plane, "
 			+ "nearest first, at most " + TRACKED_PER_TICK + " at a time and " + MAX_NPC_ACTORS + " NPCs and " + MAX_PLAYER_ACTORS + " players in all. "
-			+ "Ground tiles and named objects are discovered within " + radius + " tiles on the player's plane; at most "
-			+ MAX_CELLS + " cells and " + MAX_OBJECTS + " objects. Objects appearing or vanishing are exact transitions with no known cause. "
+			+ "Ground cells are discovered within " + radius + " tiles on the player's plane, at most " + MAX_CELLS + ". "
+			+ "Objects and ground items cover the whole loaded scene on all planes, at most " + MAX_SCENE_OBJECTS + " objects a scene load. "
+			+ "Objects appearing or vanishing are exact transitions with no known cause. "
 			+ "Optional own public chat and NPC overhead speech share a " + MAX_SPEECH + "-line budget. "
 			+ "Instanced areas include the loaded scene's corner heights on all planes. "
 			+ "Optional drops and milestones: loot received as item ids, quantities and Grand Exchange values, and a closed list of the game's own milestone messages "
@@ -918,27 +962,28 @@ public final class OsrsCapture
 		return false;
 	}
 
-	public void tick(boolean rediscover)
+	/** False when the tick stopped early, so a pending scene load is retried. */
+	public boolean tick(boolean rediscover)
 	{
 		if (!recording)
 		{
-			return;
+			return false;
 		}
 		if (recorder.state() == Recorder.State.FAILED)
 		{
 			stop("recorder unavailable");
-			return;
+			return false;
 		}
 		double t = session.time();
 		if (!armed && checkLimit(t))
 		{
-			return;
+			return false;
 		}
 		WorldView view = client.getTopLevelWorldView();
 		Player me = client.getLocalPlayer();
 		if (view == null || me == null || me.getWorldLocation() == null)
 		{
-			return;
+			return false;
 		}
 		if (armed)
 		{
@@ -946,44 +991,52 @@ public final class OsrsCapture
 			if (welcomeScreenUp())
 			{
 				statusLine = "Waiting for you to enter the world";
-				return;
+				return false;
 			}
 			open();
 			t = session.time();
 			rediscover = true;
 		}
 		WorldPoint at = me.getWorldLocation();
+		int cellsBefore = known.size();
+		int[] scene = null;
 		if (rediscover) { seedActors(view); }
 		vitals(t);
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
 		}
-		if (!recording) { return; }
+		if (!recording) { return false; }
 		Scene skyScene = view.getScene();
 		JsonObject sky = sceneSkybox.changed(skyScene == null ? null : skyScene.getSkybox(),
 			client.getTextureProvider() == null ? 0.8 : client.getTextureProvider().getBrightness());
 		if (sky != null)
 		{
-			if (skyboxCount >= 2000) { stop("skybox limit", true); return; }
+			if (skyboxCount >= 2000) { stop("skybox limit", true); return false; }
 			sky.addProperty("dimension", session.dimension);
-			if (!emit("osrs.skybox", t, sky, PLAYER, false)) { return; }
+			if (!emit("osrs.skybox", t, sky, PLAYER, false)) { return false; }
 			skyboxCount++;
+		}
+		if (rediscover)
+		{
+			scene = baselineScene(view, t);
+			if (!recording) { return false; }
 		}
 		long cell = SceneMapper.key(at.getX(), at.getPlane(), at.getY());
 		if (rediscover || cell != lastPlayerCell)
 		{
 			lastPlayerCell = cell;
-			enqueueDiscovery(at);
+			discoverCells(view, at, t);
 		}
-		discoverPending(view, t);
 		if (!recording)
 		{
-			return;
+			return false;
 		}
 		appearance(me, PLAYER, t);
 		pose(view, me, PLAYER, at, t, true, -1);
 		JsonArray crowd = new JsonArray();
+		int npcsSeen = 0;
+		int playersSeen = 0;
 		crowdActors = inThePicture(view, me, at);
 		for (Actor other : crowdActors)
 		{
@@ -996,6 +1049,7 @@ public final class OsrsCapture
 				{
 					npcVariant(npc, id, t);
 					crowdPose(crowd, view, npc, id, npc.getWorldLocation(), npc.getId());
+					npcsSeen++;
 				}
 			}
 			else
@@ -1005,6 +1059,7 @@ public final class OsrsCapture
 				{
 					appearance(player, id, t);
 					crowdPose(crowd, view, player, id, player.getWorldLocation(), -1);
+					playersSeen++;
 				}
 			}
 		}
@@ -1013,7 +1068,7 @@ public final class OsrsCapture
 			if (poseCount + crowd.size() > MAX_POSES)
 			{
 				stop("pose limit", true);
-				return;
+				return false;
 			}
 			JsonObject payload = new JsonObject();
 			payload.addProperty("dimension", session.dimension);
@@ -1023,8 +1078,14 @@ public final class OsrsCapture
 				poseCount += crowd.size();
 			}
 		}
+		if (rediscover && recording && scene != null)
+		{
+			emit("osrs.scene_loaded", t, sceneLoaded(client.getTickCount(), view.getBaseX(), view.getBaseY(), at,
+				known.size() - cellsBefore, scene, npcsSeen, playersSeen), PLAYER, false);
+		}
 		statusLine = String.format(Locale.ROOT, "Recording %d:%02d · %d cells · %d objects%s", (int) t / 60, (int) t % 60, known.size(), objectCount,
-			cellLimit || objectLimit ? " · area captured" : "");
+			cellLimit || sceneTruncated ? " · area captured" : "");
+		return true;
 	}
 
 	private boolean welcomeScreenUp()
@@ -1532,175 +1593,287 @@ public final class OsrsCapture
 		return heights[plane][sx][sy];
 	}
 
-	private void enqueueDiscovery(WorldPoint at)
+	/** Ground cells within the radius on the player's plane, nearest first. */
+	private void discoverCells(WorldView view, WorldPoint at, double t)
 	{
-		if (cellLimit && objectLimit)
+		Scene scene = view.getScene();
+		Tile[][][] tiles = scene == null ? null : scene.getTiles();
+		if (cellLimit || tiles == null)
 		{
 			return;
 		}
-		pending.removeIf(tile -> tile[2] != at.getPlane()
-			|| Math.pow(tile[0] - at.getX(), 2) + Math.pow(tile[1] - at.getY(), 2) > radius * radius);
-		Set<Long> queued = new HashSet<>();
-		for (int[] tile : pending) { queued.add(SceneMapper.key(tile[0], tile[2], tile[1])); }
+		short[][][] overlays = scene.getOverlayIds();
+		short[][][] underlays = scene.getUnderlayIds();
+		int[][][] heights = view.getTileHeights();
+		int plane = at.getPlane();
 		List<int[]> ring = new ArrayList<>();
 		for (int dx = -radius; dx <= radius; dx++)
 		{
 			for (int dy = -radius; dy <= radius; dy++)
 			{
-				if (dx * dx + dy * dy > radius * radius
-					|| queued.contains(SceneMapper.key(at.getX() + dx, at.getPlane(), at.getY() + dy)))
-				{
-					continue;
-				}
-				ring.add(new int[]{at.getX() + dx, at.getY() + dy, at.getPlane(), dx * dx + dy * dy});
+				if (dx * dx + dy * dy <= radius * radius) { ring.add(new int[]{dx, dy, dx * dx + dy * dy}); }
 			}
 		}
-		ring.sort((a, b) -> Integer.compare(a[3], b[3]));
-		pending.addAll(ring);
-	}
-
-	private void discoverPending(WorldView view, double t)
-	{
-		if (pending.isEmpty() || (cellLimit && objectLimit))
-		{
-			pending.clear();
-			return;
-		}
-		Scene scene = view.getScene();
-		if (scene == null)
-		{
-			return;
-		}
-		Tile[][][] tiles = scene.getTiles();
-		short[][][] overlays = scene.getOverlayIds();
-		short[][][] underlays = scene.getUnderlayIds();
-		int[][][] heights = view.getTileHeights();
-		if (tiles == null)
-		{
-			return;
-		}
+		ring.sort((a, b) -> Integer.compare(a[2], b[2]));
 		List<int[]> cells = new ArrayList<>();
 		List<String> materials = new ArrayList<>();
-		JsonArray objects = new JsonArray();
-		int baseX = view.getBaseX();
-		int baseY = view.getBaseY();
-		int walked = 0;
-		while (!pending.isEmpty() && walked < TILES_PER_TICK)
+		for (int[] step : ring)
 		{
-			int[] next = pending.poll();
-			int worldX = next[0], worldY = next[1], plane = next[2];
-			int sx = worldX - baseX;
-			int sy = worldY - baseY;
-			if (plane < 0 || plane >= tiles.length || sx < 0 || sy < 0 || sx >= Constants.SCENE_SIZE || sy >= Constants.SCENE_SIZE
-				|| sx >= tiles[plane].length || sy >= tiles[plane][sx].length)
+			int worldX = at.getX() + step[0], worldY = at.getY() + step[1];
+			int sx = worldX - view.getBaseX(), sy = worldY - view.getBaseY();
+			if (plane < 0 || plane >= tiles.length || sx < 0 || sy < 0 || sx >= tiles[plane].length || sy >= tiles[plane][sx].length)
 			{
 				continue;
 			}
 			int height = heights != null && plane < heights.length && sx < heights[plane].length && sy < heights[plane][sx].length
 				? heights[plane][sx][sy] : 0;
-			Tile tile = tiles[plane][sx][sy];
-			long tileKey = SceneMapper.key(worldX, plane, worldY);
-			if (known.containsKey(SceneMapper.key(SceneMapper.groundCell(worldX, worldY, plane, height)))
-				&& known.containsKey(SceneMapper.key(SceneMapper.objectCell(worldX, worldY, plane, height)))
-				&& objectTiles.contains(tileKey)) { continue; }
-			walked++;
-			if (!cellLimit)
+			int[] ground = SceneMapper.groundCell(worldX, worldY, plane, height);
+			if (!known.containsKey(SceneMapper.key(ground)))
 			{
-				int[] ground = SceneMapper.groundCell(worldX, worldY, plane, height);
-				if (!known.containsKey(SceneMapper.key(ground)))
-				{
-					short overlay = overlays != null && plane < overlays.length && sx < overlays[plane].length && sy < overlays[plane][sx].length
-						? overlays[plane][sx][sy] : 0;
-					short underlay = underlays != null && plane < underlays.length && sx < underlays[plane].length && sy < underlays[plane][sx].length
-						? underlays[plane][sx][sy] : 0;
-					if (!offer(cells, materials, ground, SceneMapper.groundMaterial(overlay, underlay), t))
-					{
-						flushObjects(objects, t);
-						return;
-					}
-				}
-				int[] above = SceneMapper.objectCell(worldX, worldY, plane, height);
-				if (!known.containsKey(SceneMapper.key(above)))
-				{
-					String material = tile == null ? SceneMapper.AIR : topMaterial(tile, 0L);
-					if (!offer(cells, materials, above, material, t))
-					{
-						flushObjects(objects, t);
-						return;
-					}
-				}
+				short overlay = overlays != null && plane < overlays.length && sx < overlays[plane].length && sy < overlays[plane][sx].length
+					? overlays[plane][sx][sy] : 0;
+				short underlay = underlays != null && plane < underlays.length && sx < underlays[plane].length && sy < underlays[plane][sx].length
+					? underlays[plane][sx][sy] : 0;
+				if (!offer(cells, materials, ground, SceneMapper.groundMaterial(overlay, underlay), t)) { return; }
 			}
-			if (!objectLimit)
+			int[] above = SceneMapper.objectCell(worldX, worldY, plane, height);
+			if (!known.containsKey(SceneMapper.key(above)))
 			{
-				if (!objectTiles.contains(tileKey))
-				{
-					objectTiles.add(tileKey);
-					if (tile != null && !collectObjects(tile, worldX, worldY, plane, objects, t))
-					{
-						snapshot(cells, materials, t);
-						return;
-					}
-				}
+				Tile tile = tiles[plane][sx][sy];
+				if (!offer(cells, materials, above, tile == null ? SceneMapper.AIR : topMaterial(tile, 0L), t)) { return; }
 			}
 		}
 		snapshot(cells, materials, t);
-		flushObjects(objects, t);
 	}
 
-	private boolean collectObjects(Tile tile, int worldX, int worldY, int plane, JsonArray objects, double t)
+	/** One object found on a tile, with what identifies it across scene loads. */
+	private static final class Found
+	{
+		final TileObject object;
+		final int kind;
+		final int config;
+		final int impostor;
+		final long signature;
+
+		Found(TileObject object, int kind, int config, int impostor)
+		{
+			this.object = object;
+			this.kind = kind;
+			this.config = config;
+			this.impostor = impostor;
+			this.signature = signature(object.getId(), impostor, kind, config);
+		}
+	}
+
+	static long signature(int id, int impostor, int kind, int config)
+	{
+		return ((long) (id & 0xFFFFFF) << 33) | ((long) ((impostor + 1) & 0xFFFFFF) << 9)
+			| ((long) kind << 7) | ((long) SceneMapper.objectType(config) << 2) | SceneMapper.objectOrientation(config);
+	}
+
+	/** The signature without its impostor, which follows game state rather than the object. */
+	private static long base(long signature)
+	{
+		return signature & ~(0xFFFFFFL << 9);
+	}
+
+	/**
+	 * Every object and ground item in the loaded scene, all planes, in this tick. A tile already written
+	 * this scene is compared and only its differences are written; returns objects written, removed,
+	 * ground items, and 1 when the per-scene object budget cut it short.
+	 */
+	private int[] baselineScene(WorldView view, double t)
+	{
+		int[] counts = new int[4];
+		Scene scene = view.getScene();
+		Tile[][][] tiles = scene == null ? null : scene.getTiles();
+		if (tiles == null)
+		{
+			return counts;
+		}
+		int baseX = view.getBaseX(), baseY = view.getBaseY();
+		JsonArray objects = new JsonArray();
+		JsonArray gone = new JsonArray();
+		JsonArray items = new JsonArray();
+		List<Found> here = new ArrayList<>();
+		sceneTruncated = false;
+		for (int plane = 0; plane < tiles.length; plane++)
+		{
+			for (int sx = 0; sx < tiles[plane].length; sx++)
+			{
+				for (int sy = 0; sy < tiles[plane][sx].length; sy++)
+				{
+					Tile tile = tiles[plane][sx][sy];
+					int worldX = baseX + sx, worldY = baseY + sy;
+					long tileKey = SceneMapper.key(worldX, plane, worldY);
+					here.clear();
+					if (tile != null)
+					{
+						anchoredObjects(tile, sx, sy, here);
+						items(tile, worldX, worldY, plane, items, counts);
+					}
+					long[] before = sceneObjects.get(tileKey);
+					long[] now = new long[here.size()];
+					for (int i = 0; i < now.length; i++) { now[i] = here.get(i).signature; }
+					Arrays.sort(now);
+					if (before == null ? now.length == 0 : Arrays.equals(before, now))
+					{
+						continue;
+					}
+					if (counts[0] + now.length > MAX_SCENE_OBJECTS)
+					{
+						sceneTruncated = true;
+						continue;
+					}
+					if (before != null)
+					{
+						for (long old : before)
+						{
+							if (Arrays.binarySearch(now, old) < 0) { gone.add(removedEntry(old, worldX, worldY, plane)); counts[1]++; }
+						}
+					}
+					for (Found found : here)
+					{
+						if (before != null && Arrays.binarySearch(before, found.signature) >= 0) { continue; }
+						objects.add(entry(found, worldX, worldY, plane, worldX, worldY));
+						counts[0]++;
+					}
+					if (now.length == 0) { sceneObjects.remove(tileKey); }
+					else { sceneObjects.put(tileKey, now); }
+				}
+			}
+		}
+		counts[3] = sceneTruncated ? 1 : 0;
+		// Removals first: an object whose look changed is written as gone and then as it stands now.
+		if (!emitObjects("despawned", gone, t) || !emitObjects("baseline", objects, t)) { return counts; }
+		emitItems(view, items, t);
+		return counts;
+	}
+
+	/** A tile's objects; a game object is listed only on the tile it is anchored on. */
+	private void anchoredObjects(Tile tile, int sx, int sy, List<Found> here)
 	{
 		GameObject[] gameObjects = tile.getGameObjects();
 		if (gameObjects != null)
 		{
 			for (GameObject object : gameObjects)
 			{
-				if (object != null && !offerObject(objects, entry(object, KIND_GAME, object.getConfig(), worldX, worldY, plane), t))
-				{
-					return false;
-				}
+				if (object == null) { continue; }
+				net.runelite.api.Point min = object.getSceneMinLocation();
+				if (min != null && (min.getX() != sx || min.getY() != sy)) { continue; }
+				here.add(new Found(object, KIND_GAME, object.getConfig(), impostor(object.getId())));
 			}
 		}
 		WallObject wall = tile.getWallObject();
-		if (wall != null && !offerObject(objects, entry(wall, KIND_WALL, wall.getConfig(), worldX, worldY, plane), t))
-		{
-			return false;
-		}
+		if (wall != null) { here.add(new Found(wall, KIND_WALL, wall.getConfig(), impostor(wall.getId()))); }
 		GroundObject ground = tile.getGroundObject();
-		if (ground != null && !offerObject(objects, entry(ground, KIND_GROUND, ground.getConfig(), worldX, worldY, plane), t))
-		{
-			return false;
-		}
+		if (ground != null) { here.add(new Found(ground, KIND_GROUND, ground.getConfig(), impostor(ground.getId()))); }
 		DecorativeObject decoration = tile.getDecorativeObject();
-		if (decoration != null && !offerObject(objects, entry(decoration, KIND_DECORATIVE, decoration.getConfig(), worldX, worldY, plane), t))
-		{
-			return false;
-		}
-		return true;
+		if (decoration != null) { here.add(new Found(decoration, KIND_DECORATIVE, decoration.getConfig(), impostor(decoration.getId()))); }
 	}
 
-	private JsonObject entry(TileObject object, int kind, int config, int worldX, int worldY, int plane)
+	private static void items(Tile tile, int worldX, int worldY, int plane, JsonArray items, int[] counts)
+	{
+		List<TileItem> ground = tile.getGroundItems();
+		if (ground == null) { return; }
+		for (TileItem item : ground)
+		{
+			if (item == null || counts[2] >= MAX_SCENE_ITEMS) { continue; }
+			items.add(itemEntry(worldX, worldY, plane, item));
+			counts[2]++;
+		}
+	}
+
+	/** [x, y, plane, item id, quantity]. */
+	private static JsonArray itemEntry(int worldX, int worldY, int plane, TileItem item)
+	{
+		JsonArray entry = new JsonArray();
+		entry.add(worldX);
+		entry.add(worldY);
+		entry.add(plane);
+		entry.add(item.getId());
+		entry.add(item.getQuantity());
+		return entry;
+	}
+
+	/** The scene's ground items; the first row's box replaces what an earlier load held there. */
+	private void emitItems(WorldView view, JsonArray items, double t)
+	{
+		int from = 0;
+		do
+		{
+			JsonArray chunk = new JsonArray();
+			for (int i = from; i < Math.min(items.size(), from + OBJECT_CHUNK); i++) { chunk.add(items.get(i)); }
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", session.dimension);
+			payload.addProperty("scope", from == 0 ? "scene" : "baseline");
+			if (from == 0)
+			{
+				payload.addProperty("base_x", view.getBaseX());
+				payload.addProperty("base_y", view.getBaseY());
+				payload.addProperty("size", Constants.SCENE_SIZE);
+			}
+			payload.add("items", chunk);
+			if (!emit("osrs.ground_items", t, payload, PLAYER, false)) { return; }
+			from += OBJECT_CHUNK;
+		}
+		while (from < items.size());
+	}
+
+	public void itemChanged(Tile tile, TileItem item, boolean spawned)
+	{
+		if (!acceptingEvents() || tile == null || item == null) { return; }
+		WorldPoint at = tile.getWorldLocation();
+		if (at == null) { return; }
+		double t = session.time();
+		if (objectEvents >= MAX_OBJECT_EVENTS) { stop("object event limit", true); return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("dimension", session.dimension);
+		payload.addProperty("scope", spawned ? "spawned" : "despawned");
+		JsonArray items = new JsonArray();
+		items.add(itemEntry(at.getX(), at.getY(), at.getPlane(), item));
+		payload.add("items", items);
+		if (emit("osrs.ground_items", t, payload, PLAYER, false)) { objectEvents++; }
+	}
+
+	private JsonObject entry(Found found, int worldX, int worldY, int plane, int anchorX, int anchorY)
 	{
 		JsonObject entry = new JsonObject();
 		entry.addProperty("x", worldX);
 		entry.addProperty("y", worldY);
 		entry.addProperty("plane", plane);
-		entry.addProperty("id", object.getId());
-		entry.addProperty("kind", kind);
-		entry.addProperty("type", SceneMapper.objectType(config));
-		entry.addProperty("orientation", SceneMapper.objectOrientation(config));
-		int impostor = impostor(object.getId());
-		if (impostor >= 0)
+		entry.addProperty("id", found.object.getId());
+		entry.addProperty("kind", found.kind);
+		entry.addProperty("type", SceneMapper.objectType(found.config));
+		entry.addProperty("orientation", SceneMapper.objectOrientation(found.config));
+		if (found.impostor >= 0)
 		{
-			entry.addProperty("impostor_id", impostor);
+			entry.addProperty("impostor_id", found.impostor);
 		}
-		if (object instanceof GameObject)
+		if (found.kind == KIND_GAME)
 		{
-			GameObject game = (GameObject) object;
-			if (game.getSceneMinLocation() != null)
-			{
-				entry.addProperty("anchor_x", game.getSceneMinLocation().getX() + client.getTopLevelWorldView().getBaseX());
-				entry.addProperty("anchor_y", game.getSceneMinLocation().getY() + client.getTopLevelWorldView().getBaseY());
-			}
+			entry.addProperty("anchor_x", anchorX);
+			entry.addProperty("anchor_y", anchorY);
+		}
+		return entry;
+	}
+
+	/** What a despawn needs from a stored signature: tile, id, kind, type and orientation. */
+	private static JsonObject removedEntry(long signature, int worldX, int worldY, int plane)
+	{
+		int kind = (int) ((signature >>> 7) & 3);
+		JsonObject entry = new JsonObject();
+		entry.addProperty("x", worldX);
+		entry.addProperty("y", worldY);
+		entry.addProperty("plane", plane);
+		entry.addProperty("id", (int) ((signature >>> 33) & 0xFFFFFF));
+		entry.addProperty("kind", kind);
+		entry.addProperty("type", (int) ((signature >>> 2) & 31));
+		entry.addProperty("orientation", (int) (signature & 3));
+		if (kind == KIND_GAME)
+		{
+			entry.addProperty("anchor_x", worldX);
+			entry.addProperty("anchor_y", worldY);
 		}
 		return entry;
 	}
@@ -1723,45 +1896,22 @@ public final class OsrsCapture
 		}
 	}
 
-	private boolean offerObject(JsonArray objects, JsonObject entry, double t)
+	private boolean emitObjects(String scope, JsonArray objects, double t)
 	{
-		if (objectCount + objects.size() >= MAX_OBJECTS)
+		for (int from = 0; from < objects.size(); from += OBJECT_CHUNK)
 		{
-			objectLimit = true;
-			flushObjects(objects, t);
-			stop("object limit", true);
-			return false;
+			JsonArray chunk = new JsonArray();
+			for (int i = from; i < Math.min(objects.size(), from + OBJECT_CHUNK); i++) { chunk.add(objects.get(i)); }
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", session.dimension);
+			payload.addProperty("scope", scope);
+			payload.add("objects", chunk);
+			if (!emit("osrs.object", t, payload, PLAYER, false))
+			{
+				return false;
+			}
+			if ("baseline".equals(scope)) { objectCount += chunk.size(); }
 		}
-		objects.add(entry);
-		if (objects.size() >= OBJECT_CHUNK)
-		{
-			return flushObjects(objects, t);
-		}
-		return true;
-	}
-
-	private boolean flushObjects(JsonArray objects, double t)
-	{
-		if (objects.size() == 0)
-		{
-			return true;
-		}
-		JsonObject payload = new JsonObject();
-		payload.addProperty("dimension", session.dimension);
-		payload.addProperty("scope", "baseline");
-		int size = objects.size();
-		JsonArray copy = new JsonArray();
-		copy.addAll(objects);
-		payload.add("objects", copy);
-		while (objects.size() > 0)
-		{
-			objects.remove(objects.size() - 1);
-		}
-		if (!emit("osrs.object", t, payload, PLAYER, false))
-		{
-			return false;
-		}
-		objectCount += size;
 		return true;
 	}
 
@@ -1769,9 +1919,9 @@ public final class OsrsCapture
 	{
 		if (known.size() + cells.size() >= MAX_CELLS)
 		{
+			// Cells stop here; the recording goes on, the game's own map covers the ground.
 			cellLimit = true;
 			snapshot(cells, materials, t);
-			stop("cell limit", true);
 			return false;
 		}
 		cells.add(cell);
@@ -1913,6 +2063,34 @@ public final class OsrsCapture
 		{
 			return;
 		}
+		int kind = object instanceof WallObject ? KIND_WALL : object instanceof GroundObject ? KIND_GROUND
+			: object instanceof DecorativeObject ? KIND_DECORATIVE : KIND_GAME;
+		int config = object instanceof GameObject ? ((GameObject) object).getConfig()
+			: object instanceof WallObject ? ((WallObject) object).getConfig()
+			: object instanceof GroundObject ? ((GroundObject) object).getConfig()
+			: object instanceof DecorativeObject ? ((DecorativeObject) object).getConfig() : 0;
+		int anchorX = at.getX(), anchorY = at.getY();
+		if (object instanceof GameObject && ((GameObject) object).getSceneMinLocation() != null)
+		{
+			anchorX = view.getBaseX() + ((GameObject) object).getSceneMinLocation().getX();
+			anchorY = view.getBaseY() + ((GameObject) object).getSceneMinLocation().getY();
+		}
+		Found found = new Found(object, kind, config, impostor(object.getId()));
+		if (transition(SceneMapper.key(anchorX, at.getPlane(), anchorY), found.signature, spawned))
+		{
+			if (objectEvents >= MAX_OBJECT_EVENTS)
+			{
+				stop("object event limit", true);
+				return;
+			}
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", session.dimension);
+			payload.addProperty("scope", spawned ? "spawned" : "despawned");
+			JsonArray objects = new JsonArray();
+			objects.add(entry(found, anchorX, anchorY, at.getPlane(), anchorX, anchorY));
+			payload.add("objects", objects);
+			if (emit("osrs.object", t, payload, PLAYER, false)) { objectEvents++; }
+		}
 		WorldPoint mine = me.getWorldLocation();
 		int dx = at.getX() - mine.getX();
 		int dy = at.getY() - mine.getY();
@@ -1938,23 +2116,6 @@ public final class OsrsCapture
 			{
 				return;
 			}
-		}
-		if (nearby && !objectLimit && eventCount < MAX_EVENTS)
-		{
-			int kind = object instanceof WallObject ? KIND_WALL : object instanceof GroundObject ? KIND_GROUND
-				: object instanceof DecorativeObject ? KIND_DECORATIVE : KIND_GAME;
-			int config = object instanceof GameObject ? ((GameObject) object).getConfig()
-				: object instanceof WallObject ? ((WallObject) object).getConfig()
-				: object instanceof GroundObject ? ((GroundObject) object).getConfig()
-				: object instanceof DecorativeObject ? ((DecorativeObject) object).getConfig() : 0;
-			JsonObject payload = new JsonObject();
-			payload.addProperty("dimension", session.dimension);
-			payload.addProperty("scope", spawned ? "spawned" : "despawned");
-			JsonArray objects = new JsonArray();
-			objects.add(entry(object, kind, config, at.getX(), at.getY(), at.getPlane()));
-			payload.add("objects", objects);
-			if (emit("osrs.object", t, payload, PLAYER, false)) { eventCount++; }
-			objectTiles.add(SceneMapper.key(at.getX(), at.getPlane(), at.getY()));
 		}
 		if (before.equals(after))
 		{
@@ -1986,6 +2147,33 @@ public final class OsrsCapture
 			eventCount++;
 			known.put(key, after);
 		}
+	}
+
+	/** Update a tile's written objects; false when the change is already written (or a despawn of nothing written). */
+	private boolean transition(long tileKey, long signature, boolean spawned)
+	{
+		long[] held = sceneObjects.get(tileKey);
+		if (spawned)
+		{
+			if (held != null && Arrays.binarySearch(held, signature) >= 0) { return false; }
+			long[] next = held == null ? new long[]{signature} : Arrays.copyOf(held, held.length + 1);
+			next[next.length - 1] = signature;
+			Arrays.sort(next);
+			sceneObjects.put(tileKey, next);
+			return true;
+		}
+		if (held == null) { return false; }
+		for (int i = 0; i < held.length; i++)
+		{
+			if (base(held[i]) != base(signature)) { continue; }
+			long[] next = new long[held.length - 1];
+			System.arraycopy(held, 0, next, 0, i);
+			System.arraycopy(held, i + 1, next, i, held.length - i - 1);
+			if (next.length == 0) { sceneObjects.remove(tileKey); }
+			else { sceneObjects.put(tileKey, next); }
+			return true;
+		}
+		return false;
 	}
 
 	private boolean checkLimit(double t)

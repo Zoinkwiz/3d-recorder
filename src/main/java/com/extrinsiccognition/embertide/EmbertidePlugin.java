@@ -34,6 +34,8 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GroundObjectDespawned;
 import net.runelite.api.events.GroundObjectSpawned;
+import net.runelite.api.events.ItemDespawned;
+import net.runelite.api.events.ItemSpawned;
 import net.runelite.api.events.WallObjectDespawned;
 import net.runelite.api.events.WallObjectSpawned;
 import net.runelite.client.callback.ClientThread;
@@ -184,6 +186,7 @@ public class EmbertidePlugin extends Plugin
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		loggedIn = event.getGameState() == GameState.LOGGED_IN;
+		if (capture != null) { capture.gameState(event.getGameState().name()); }
 		switch (event.getGameState())
 		{
 			case LOADING:
@@ -246,8 +249,7 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		boolean opening = rediscover;
-		current.tick(rediscover);
-		rediscover = false;
+		if (current.tick(rediscover)) { rediscover = false; }
 		if (opening)
 		{
 			current.clientTick();
@@ -455,6 +457,22 @@ public class EmbertidePlugin extends Plugin
 	public void onDecorativeObjectDespawned(DecorativeObjectDespawned event)
 	{
 		objectChanged(event.getTile(), event.getDecorativeObject(), false);
+	}
+
+	@Subscribe
+	public void onItemSpawned(ItemSpawned event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
+		current.itemChanged(event.getTile(), event.getItem(), true);
+	}
+
+	@Subscribe
+	public void onItemDespawned(ItemDespawned event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
+		current.itemChanged(event.getTile(), event.getItem(), false);
 	}
 
 	private void objectChanged(net.runelite.api.Tile tile, net.runelite.api.TileObject object, boolean spawned)
