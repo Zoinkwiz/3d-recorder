@@ -68,6 +68,17 @@ public interface EmbertideConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "recordMoments",
+		name = "Record drops and milestones",
+		description = "Mark the big moments in the replay: the loot you get and the game's own messages for kill counts, pets, collection log, clues, tasks, quests and diaries. Only item ids, values and the kind of milestone with its count or name are kept, never the chat text.",
+		position = 9
+	)
+	default boolean recordMoments()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Start recording when you log in",
 		description = "Start recording as soon as you're in the world. Turn it off if you'd rather press Start yourself.",
