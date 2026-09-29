@@ -536,8 +536,8 @@ public class EmbertidePlugin extends Plugin
 			boolean recover = pending != null && pending.recorder().state() == Recorder.State.FAILED;
 			boolean resume = enabled && !stopped && (manual || continuing || config.recordOnLogin());
 			text.append(handingOff ? "Saving your recording." + (resume ? " Recording resumes after it is saved." : "")
-				: recover ? "Recording paused. The unsaved recording is still in memory.\n\n"
-					+ pending.recorder().error() + "\n\nRetry saving, or discard it. Closing RuneLite loses this unsaved recording."
+				: recover ? "Recording paused. The unsaved part is kept as a .partial file.\n\n"
+					+ pending.recorder().error() + "\n\nRetry saving, or discard it."
 				: stopped ? "Not recording." : notice);
 			boolean in = loggedIn;
 			if (!in)
@@ -559,7 +559,7 @@ public class EmbertidePlugin extends Plugin
 		}
 		else
 		{
-			text.append("\n\nEach recording is written to its file when it ends. Other players are recorded as unnamed figures.");
+			text.append("\n\nOther players are recorded as unnamed figures.");
 		}
 		boolean busy = !current.recording();
 		String name = recorder instanceof MccrFileRecorder && ((MccrFileRecorder) recorder).path() != null
@@ -619,7 +619,7 @@ public class EmbertidePlugin extends Plugin
 		capture = next;
 		continuing = true;
 		rediscover = freshBaseline;
-		notice = "Recording. The file is saved when this part ends.";
+		notice = "Recording.";
 		next.start().whenComplete((ignored, throwable) ->
 		{
 			if (throwable != null)
@@ -676,7 +676,7 @@ public class EmbertidePlugin extends Plugin
 			else
 			{
 				notice = "Recording paused: retry saving or discard the unsaved recording.";
-				log.warn("Could not save Embertide recording; retained in memory for retry", throwable);
+				log.warn("Could not save recording", throwable);
 			}
 			handingOff = false;
 		});
