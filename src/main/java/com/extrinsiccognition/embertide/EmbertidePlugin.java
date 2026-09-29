@@ -6,6 +6,10 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -36,11 +40,16 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ClientShutdown;
+import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.Text;
+import net.runelite.http.api.loottracker.LootRecordType;
 
 @Slf4j
 @PluginDescriptor(
@@ -71,10 +80,10 @@ public class EmbertidePlugin extends Plugin
 	{
 		final String text;
 		final String current;
-		final java.util.List<SavedFile> saved;
+		final List<SavedFile> saved;
 		final boolean recording;
 		final boolean canToggle;
-		PanelState(String text, String current, java.util.List<SavedFile> saved, boolean recording, boolean canToggle)
+		PanelState(String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle)
 		{
 			this.text = text;
 			this.current = current;
@@ -98,6 +107,8 @@ public class EmbertidePlugin extends Plugin
 	private ConfigManager configManager;
 	@Inject
 	private java.util.concurrent.ScheduledExecutorService executor;
+	@Inject
+	private ItemManager itemManager;
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -120,7 +131,7 @@ public class EmbertidePlugin extends Plugin
 	private String series;
 	private int nextPart;
 	private final java.util.Map<String, String> pseudonyms = new java.util.HashMap<>();
-	private final java.util.List<SavedFile> saved = new java.util.concurrent.CopyOnWriteArrayList<>();
+	private final List<SavedFile> saved = new java.util.concurrent.CopyOnWriteArrayList<>();
 
 	@Provides
 	EmbertideConfig provideConfig(ConfigManager configManager)
@@ -359,7 +370,7 @@ public class EmbertidePlugin extends Plugin
 		{
 			return;
 		}
-		current.statChanged(event.getSkill(), event.getLevel());
+		current.statChanged(event.getSkill(), event.getLevel(), event.getXp(), event.getBoostedLevel());
 	}
 
 	@Subscribe
@@ -367,7 +378,20 @@ public class EmbertidePlugin extends Plugin
 	{
 		OsrsCapture current = capture;
 		Player me = client.getLocalPlayer();
-		if (current == null || me == null || !config.recordOwnChat() || event.getType() != ChatMessageType.PUBLICCHAT)
+		if (current == null || me == null)
+		{
+			return;
+		}
+		if (event.getType() == ChatMessageType.GAMEMESSAGE || event.getType() == ChatMessageType.SPAM)
+		{
+			// Allowlisted kinds only.
+			if (config.recordMoments())
+			{
+				current.gameMessage(GameMessages.match(event.getType(), event.getMessage()));
+			}
+			return;
+		}
+		if (!config.recordOwnChat() || event.getType() != ChatMessageType.PUBLICCHAT)
 		{
 			return;
 		}
@@ -376,6 +400,49 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		current.ownChat(Text.removeTags(event.getMessage()), me.getName());
+	}
+
+	@Subscribe
+	public void onNpcLootReceived(NpcLootReceived event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || !config.recordMoments())
+		{
+			return;
+		}
+		NPC npc = event.getNpc();
+		current.loot("npc", npc == null ? null : npc.getName(), npc, priced(event.getItems()));
+	}
+
+	@Subscribe
+	public void onLootReceived(LootReceived event)
+	{
+		OsrsCapture current = capture;
+		// NPC kills arrive via NpcLootReceived.
+		if (current == null || !config.recordMoments() || event.getType() == null
+			|| event.getType() == LootRecordType.NPC)
+		{
+			return;
+		}
+		String kind = event.getType().name().toLowerCase(Locale.ROOT);
+		// Never record another player's name.
+		current.loot(kind, "player".equals(kind) ? null : event.getName(), null, priced(event.getItems()));
+	}
+
+	/** [item id, quantity, GE price each]; client thread. */
+	private List<int[]> priced(Collection<ItemStack> items)
+	{
+		List<int[]> out = new ArrayList<>();
+		if (items == null)
+		{
+			return out;
+		}
+		for (ItemStack stack : items)
+		{
+			long each = itemManager.getItemPrice(itemManager.canonicalize(stack.getId()));
+			out.add(new int[]{stack.getId(), stack.getQuantity(), (int) Math.min(each, Integer.MAX_VALUE)});
+		}
+		return out;
 	}
 
 	@Subscribe
@@ -528,7 +595,7 @@ public class EmbertidePlugin extends Plugin
 	PanelState panelState()
 	{
 		OsrsCapture current = capture;
-		java.util.List<SavedFile> files = new java.util.ArrayList<>(saved);
+		List<SavedFile> files = new ArrayList<>(saved);
 		StringBuilder text = new StringBuilder();
 		if (current == null)
 		{
@@ -576,7 +643,7 @@ public class EmbertidePlugin extends Plugin
 
 	static String fileStem(String playerName)
 	{
-		String who = playerName == null ? "" : playerName.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+		String who = playerName == null ? "" : playerName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
 		String when = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
 		return "osrs-" + when + (who.isEmpty() ? "" : "-" + who);
 	}
