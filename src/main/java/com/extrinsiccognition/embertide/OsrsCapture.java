@@ -13,7 +13,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.Constants;
@@ -35,9 +34,9 @@ import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.util.Text;
 
-@Slf4j
 public final class OsrsCapture
 {
 	public static final String OSRS_PROFILE = "ec.mccr.osrs/6";
@@ -293,8 +292,8 @@ public final class OsrsCapture
 		{
 			payload.addProperty("hitsplat_type", type);
 			payload.addProperty("hitsplat_remaining", remaining);
-			payload.addProperty("hitsplat_tint_disabled", client.getVarbitValue(10236));
-			payload.addProperty("hitsplat_maxhit_disabled", client.getVarbitValue(14196));
+			payload.addProperty("hitsplat_tint_disabled", client.getVarbitValue(VarbitID.HITSPLAT_TINT_DISABLED));
+			payload.addProperty("hitsplat_maxhit_disabled", client.getVarbitValue(VarbitID.HITSPLAT_MAXHIT_DISABLED));
 		}
 		Actor attacker = mine || target != me ? null : attacker(me);
 		String source = mine ? PLAYER : (attacker != null && eventActor(attacker, me) ? actorId(attacker) : null);
