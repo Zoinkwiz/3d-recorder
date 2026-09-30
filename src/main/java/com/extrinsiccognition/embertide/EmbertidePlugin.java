@@ -24,6 +24,9 @@ import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.ProjectileMoved;
+import net.runelite.api.events.SoundEffectPlayed;
+import net.runelite.api.events.AreaSoundEffectPlayed;
 import net.runelite.api.events.OverheadTextChanged;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.DecorativeObjectDespawned;
@@ -315,6 +318,30 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		current.hitsplat(event.getActor(), event.getHitsplat(), client.getLocalPlayer());
+	}
+
+	@Subscribe
+	public void onProjectileMoved(ProjectileMoved event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover) { return; }
+		current.projectile(event.getProjectile(), client.getLocalPlayer());
+	}
+
+	@Subscribe
+	public void onSoundEffectPlayed(SoundEffectPlayed event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover) { return; }
+		current.sound(event.getSoundId(), event.getDelay(), event.getSource(), null, null, null, client.getLocalPlayer());
+	}
+
+	@Subscribe
+	public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover) { return; }
+		current.sound(event.getSoundId(), event.getDelay(), event.getSource(), event.getSceneX(), event.getSceneY(), event.getRange(), client.getLocalPlayer());
 	}
 
 	@Subscribe
