@@ -332,7 +332,7 @@ public final class OsrsCapture
 	/**
 	 * A projectile once, when it is first seen: what flies (a spot animation), from whom or where,
 	 * at whom or where, and the client cycles it leaves and lands on, with the heights and slope the
-	 * client arcs it by. Cycles are 20 ms; they are written as recording seconds.
+	 * client arcs it by. Cycles are 20 ms; they are written as seconds after the row.
 	 */
 	public void projectile(Projectile projectile, Player me)
 	{
@@ -351,8 +351,9 @@ public final class OsrsCapture
 		WorldPoint from = projectile.getSourcePoint(), to = projectile.getTargetPoint();
 		if (from != null) { payload.add("from", point(from)); }
 		if (to != null) { payload.add("to", point(to)); }
-		payload.addProperty("start_t", now + (projectile.getStartCycle() - cycle) * 0.02);
-		payload.addProperty("end_t", now + (projectile.getEndCycle() - cycle) * 0.02);
+		// Seconds after this row's own time, so a joined recording that moves the row moves these with it.
+		payload.addProperty("start_in", (projectile.getStartCycle() - cycle) * 0.02);
+		payload.addProperty("end_in", (projectile.getEndCycle() - cycle) * 0.02);
 		payload.addProperty("start_height", projectile.getStartHeight());
 		payload.addProperty("end_height", projectile.getEndHeight());
 		payload.addProperty("slope", projectile.getSlope());
@@ -937,7 +938,7 @@ public final class OsrsCapture
 			+ "osrs.poses entries end with the id of the actor each one is targeting (\"player\" for the local player) or null, and player.position carries osrs.interacting the same way; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
-			+ "osrs.projectile {graphic, source, target, from, to, start_t, end_t, start_height, end_height, slope, start_pos} once per projectile, times in recording seconds; "
+			+ "osrs.projectile {graphic, source, target, from, to, start_in, end_in, start_height, end_height, slope, start_pos} once per projectile, times in seconds after the row; "
 			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
