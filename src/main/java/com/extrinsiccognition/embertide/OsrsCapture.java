@@ -31,6 +31,7 @@ import net.runelite.api.Tile;
 import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
+import net.runelite.api.Projectile;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -98,6 +99,10 @@ public final class OsrsCapture
 	private int skyboxCount;
 	private int environmentCount;
 	private int graphicCount;
+	private int projectileCount;
+	private int soundCount;
+	/** Projectiles already written: RuneLite reports each one on every frame it moves. */
+	private final Map<Projectile, Boolean> projectilesSeen = new java.util.WeakHashMap<>();
 	private final Map<GraphicsObject, Integer> sceneGraphics = new java.util.IdentityHashMap<>();
 	private final Map<String, long[]> lastMotion = new HashMap<>();
 	private boolean cellLimit;
@@ -322,6 +327,75 @@ public final class OsrsCapture
 		{
 			hitCount++;
 		}
+	}
+
+	/**
+	 * A projectile once, when it is first seen: what flies (a spot animation), from whom or where,
+	 * at whom or where, and the client cycles it leaves and lands on, with the heights and slope the
+	 * client arcs it by. Cycles are 20 ms; they are written as seconds after the row.
+	 */
+	public void projectile(Projectile projectile, Player me)
+	{
+		if (!acceptingEvents() || projectile == null || projectilesSeen.containsKey(projectile)) { return; }
+		projectilesSeen.put(projectile, Boolean.TRUE);
+		if (projectileCount >= MAX_EVENTS) { return; }
+		double now = session.time();
+		int cycle = client.getGameCycle();
+		JsonObject payload = new JsonObject();
+		payload.addProperty("graphic", projectile.getId());
+		Actor source = projectile.getSourceActor(), target = projectile.getTargetActor();
+		String sourceId = source == null ? null : source == me ? PLAYER : eventActor(source, me) ? actorId(source) : null;
+		String targetId = target == null ? null : target == me ? PLAYER : eventActor(target, me) ? actorId(target) : null;
+		if (sourceId != null) { payload.addProperty("source", sourceId); }
+		if (targetId != null) { payload.addProperty("target", targetId); }
+		WorldPoint from = projectile.getSourcePoint(), to = projectile.getTargetPoint();
+		if (from != null) { payload.add("from", point(from)); }
+		if (to != null) { payload.add("to", point(to)); }
+		// Seconds after this row's own time, so a joined recording that moves the row moves these with it.
+		payload.addProperty("start_in", (projectile.getStartCycle() - cycle) * 0.02);
+		payload.addProperty("end_in", (projectile.getEndCycle() - cycle) * 0.02);
+		payload.addProperty("start_height", projectile.getStartHeight());
+		payload.addProperty("end_height", projectile.getEndHeight());
+		payload.addProperty("slope", projectile.getSlope());
+		payload.addProperty("start_pos", projectile.getStartPos());
+		payload.addProperty("dimension", session.dimension);
+		if (emit("osrs.projectile", now, payload, sourceId == null ? PLAYER : sourceId, false)) { projectileCount++; }
+	}
+
+	/**
+	 * A sound the client played: the effect id (index 4 of the cache), its delay as the client was
+	 * told it, who made it when an actor did, and for an area sound the tile and range it carries.
+	 */
+	public void sound(int soundId, int delay, Actor source, Integer sceneX, Integer sceneY, Integer range, Player me)
+	{
+		if (!acceptingEvents() || soundId < 0 || soundCount >= MAX_HITS) { return; }
+		double now = session.time();
+		JsonObject payload = new JsonObject();
+		payload.addProperty("sound", soundId);
+		payload.addProperty("delay", delay);
+		String sourceId = source == null ? null : source == me ? PLAYER : eventActor(source, me) ? actorId(source) : null;
+		if (sourceId != null) { payload.addProperty("source", sourceId); }
+		if (sceneX != null && sceneY != null)
+		{
+			WorldView view = client.getTopLevelWorldView();
+			JsonArray at = new JsonArray();
+			at.add(view.getBaseX() + sceneX);
+			at.add(view.getBaseY() + sceneY);
+			at.add(view.getPlane());
+			payload.add("at", at);
+			if (range != null) { payload.addProperty("range", range); }
+		}
+		payload.addProperty("dimension", session.dimension);
+		if (emit("osrs.sound", now, payload, sourceId == null ? PLAYER : sourceId, false)) { soundCount++; }
+	}
+
+	private static JsonArray point(WorldPoint point)
+	{
+		JsonArray at = new JsonArray();
+		at.add(point.getX());
+		at.add(point.getY());
+		at.add(point.getPlane());
+		return at;
 	}
 
 	public void actorDied(Actor actor, Player me)
@@ -863,7 +937,9 @@ public final class OsrsCapture
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
 			+ "osrs.poses entries end with the id of the actor each one is targeting (\"player\" for the local player) or null, and player.position carries osrs.interacting the same way; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
-			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text");
+			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
+			+ "osrs.projectile {graphic, source, target, from, to, start_in, end_in, start_height, end_height, slope, start_pos} once per projectile, times in seconds after the row; "
+			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
