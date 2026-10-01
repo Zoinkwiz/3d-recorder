@@ -50,8 +50,10 @@ recording.
 - What NPCs say overhead, and your own public chat.
 
 Other players are recorded as unnamed figures, "Adventurer 1", "Adventurer 2"
-and so on. The plugin never reads their names, combat levels or chat, and
-never reads private, clan or friends chat. It doesn't read your inventory or
+and so on. The plugin looks at their names only while you play, to keep each
+one's number the same and to tell your own chat from theirs. It never records
+their names, combat levels or chat, and never reads private, clan or friends
+chat. It doesn't read your inventory or
 bank, and it doesn't play for you.
 
 You can turn off NPCs, other players, overhead text, your chat, and drops and
