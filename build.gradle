@@ -33,7 +33,7 @@ dependencies {
 }
 
 group = 'com.extrinsiccognition'
-version = '0.3.0'
+version = '0.4.0'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
