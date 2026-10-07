@@ -114,6 +114,7 @@ public class EmbertidePlugin extends Plugin
 	private java.util.concurrent.ScheduledExecutorService executor;
 	@Inject
 	private ItemManager itemManager;
+	@Inject
 	private okhttp3.OkHttpClient okHttpClient;
 
 	private EmbertidePanel panel;
