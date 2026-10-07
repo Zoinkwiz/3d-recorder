@@ -20,6 +20,7 @@ import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
 import net.runelite.api.Point;
+import net.runelite.api.Preferences;
 import net.runelite.api.Projectile;
 import net.runelite.api.Scene;
 import net.runelite.api.Skill;
@@ -28,6 +29,8 @@ import net.runelite.api.WallObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 
 /**
  * A raid room of fakes advanced one client cycle (20 ms) at a time: the local player, a party, a boss and
@@ -56,6 +59,9 @@ final class RaidScene
 	int tick = 1;
 	int hp = 99;
 	int cameraYaw = 512;
+	int masterVolume = 100, soundVolume = 45, areaSoundVolume = 25;
+	// The desktop copy the server saves; the slider and mute button leave it alone.
+	int savedMasterVolume = 100;
 	final Client client;
 	final WorldView view;
 	final EmbertideConfig config;
@@ -120,6 +126,8 @@ final class RaidScene
 				default: return null;
 			}
 		});
+		Preferences preferences = fake(Preferences.class, (name, args) ->
+			"getSoundEffectVolume".equals(name) ? box(soundVolume) : "getAreaSoundEffectVolume".equals(name) ? box(areaSoundVolume) : null);
 		IndexedObjectSet<?> npcs = set(true);
 		IndexedObjectSet<?> players = set(false);
 		Deque<?> graphics = fake(Deque.class, (name, args) -> "iterator".equals(name) ? spotProxies.iterator() : null);
@@ -164,8 +172,9 @@ final class RaidScene
 				case "getBoostedSkillLevel": return box(args[0] == Skill.HITPOINTS ? hp : 90);
 				case "getRealSkillLevel": return box(99);
 				case "getEnergy": return box(8000);
-				case "getVarpValue": return box(1000);
-				case "getVarbitValue": return box(0);
+				case "getVarpValue": return box((Integer) args[0] == VarPlayerID.OPTION_MASTER_VOLUME ? masterVolume : 1000);
+				case "getVarbitValue": return box((Integer) args[0] == VarbitID.OPTION_MASTER_VOLUME_DESKTOP ? savedMasterVolume : 0);
+				case "getPreferences": return preferences;
 				case "getObjectDefinition": return rock;
 				case "getRevision": return box(236);
 				case "getWorld": return box(420);

@@ -188,6 +188,7 @@ public final class OsrsCapture
 	private static final int MAX_MOMENTS = 2000;
 	private int[] lastCamera;
 	private int[] lastVitals;
+	private int[] lastAudio;
 	private int cameraCount;
 	// Camera rows land on every change, roughly ten a second while turning.
 	private static final int MAX_CAMERA = 4_000_000;
@@ -974,7 +975,10 @@ public final class OsrsCapture
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
 			+ "osrs.projectile {graphic, source, target, from, to, start_in, end_in, start_height, end_height, slope, start_pos} once per projectile, times in seconds after the row; "
-			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound");
+			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound; "
+			+ "osrs.audio {master, sounds, area_sounds} at the start and on any change, the game's volumes from 0 to 100: "
+			+ "the client plays no sound effect while round(127 x sounds/100 x master/100) is 0 and no area sound while the same with area_sounds is 0, "
+			+ "so a volume of 0, or two whose product is under 40, leaves no osrs.sound row");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
@@ -1111,6 +1115,7 @@ public final class OsrsCapture
 		int[] scene = null;
 		if (rediscover) { seedActors(view); }
 		vitals(t);
+		audio(t);
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
@@ -1677,6 +1682,30 @@ public final class OsrsCapture
 		payload.addProperty("special", now[5]);
 		payload.addProperty("dimension", session.dimension);
 		emit("osrs.vitals", t, payload, PLAYER, false);
+	}
+
+	/** The game's volumes, 0 to 100, on change; the client neither plays nor reports a sound its volumes round to silence. */
+	private void audio(double t)
+	{
+		net.runelite.api.Preferences preferences = client.getPreferences();
+		if (preferences == null) { return; }
+		int[] now = {
+			// The slider and mute button set this varp; OPTION_MASTER_VOLUME_DESKTOP is a saved copy the client never reads.
+			client.getVarpValue(VarPlayerID.OPTION_MASTER_VOLUME),
+			preferences.getSoundEffectVolume(),
+			preferences.getAreaSoundEffectVolume(),
+		};
+		if (lastAudio != null && Arrays.equals(lastAudio, now))
+		{
+			return;
+		}
+		lastAudio = now;
+		JsonObject payload = new JsonObject();
+		payload.addProperty("master", now[0]);
+		payload.addProperty("sounds", now[1]);
+		payload.addProperty("area_sounds", now[2]);
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.audio", t, payload, PLAYER, false);
 	}
 
 	// -1 while hidden
