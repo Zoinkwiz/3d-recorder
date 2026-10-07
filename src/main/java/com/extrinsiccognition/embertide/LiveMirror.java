@@ -30,15 +30,16 @@ public final class LiveMirror implements Recorder
 		{
 			return "Live view stopped: " + stoppedBecause + " The recording is unaffected.";
 		}
-		switch (live.lifetime())
+		if (live.reconnecting())
 		{
-			case CONNECTED:
-				return "Showing live in Embertide on this computer.";
-			case CONNECTING:
-				return "Connecting the live view to Embertide…";
-			default:
-				return "";
+			return "Reconnecting the live view to Embertide…";
 		}
+		if (live.lifetime() == MccrRecorderClient.Lifetime.CONNECTED)
+		{
+			return "Showing live in Embertide on this computer.";
+		}
+		return live.state() == State.OPENING || live.lifetime() == MccrRecorderClient.Lifetime.CONNECTING
+			? "Connecting the live view to Embertide…" : "";
 	}
 
 	private void stopMirroring(String because)
@@ -50,11 +51,11 @@ public final class LiveMirror implements Recorder
 			log.debug("live mirror stopped: {}", because);
 			try
 			{
-				live.closeLifetime();
+				live.stop(because);
 			}
 			catch (RuntimeException e)
 			{
-				log.debug("closing the live lifetime failed", e);
+				log.debug("stopping the live link failed", e);
 			}
 		}
 	}
@@ -68,7 +69,7 @@ public final class LiveMirror implements Recorder
 		{
 			live.open(forLive).exceptionally(error ->
 			{
-				stopMirroring("Embertide would not start it.");
+				stopMirroring(live.error().isEmpty() ? "Embertide would not start it." : live.error());
 				return null;
 			});
 		}

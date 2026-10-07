@@ -10,11 +10,14 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -23,7 +26,7 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 
-/** Authenticated, acknowledged delivery to the app's recorder. */
+/** Authenticated, acknowledged delivery to the app's recorder, kept up while the app goes away and comes back. */
 @Slf4j
 public final class MccrRecorderClient implements Recorder
 {
@@ -33,13 +36,20 @@ public final class MccrRecorderClient implements Recorder
 	}
 
 	static final int MAX_BATCH_BYTES = 256 * 1024;
-	static final int MAX_PENDING_BYTES = 2 * 1024 * 1024;
+	// Held while the app is away: about three minutes of rows at the measured 40 KiB/s, over a minute at the busiest.
+	static final int MAX_PENDING_BYTES = 8 * 1024 * 1024;
 	static final int MAX_BATCH_RECORDS = 256;
 	static final long FLUSH_MS = 250;
-	static final long RETRY_BUDGET_MS = 30_000;
+	static final long FINISH_BUDGET_MS = 30_000;
 	static final long LIFETIME_TIMEOUT_MS = 5_000;
+	static final long MAX_BACKOFF_MS = 4_000;
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private static final Pattern CAPTURE_ID = Pattern.compile("^[a-zA-Z0-9_-]{1,160}$");
+
+	private enum Failure
+	{
+		PERMANENT, RETRY, REOPEN
+	}
 
 	private static final class Entry
 	{
@@ -53,31 +63,48 @@ public final class MccrRecorderClient implements Recorder
 		}
 	}
 
-	private static final class RecorderException extends IOException
+	/** Sent again unchanged until acknowledged, so the app can tell a retry from new rows. */
+	private static final class Batch
 	{
-		final boolean permanent;
+		final int sequence;
+		final String body;
+		final long bytes;
 
-		RecorderException(String message, boolean permanent)
+		Batch(int sequence, String body, long bytes)
 		{
-			super(message);
-			this.permanent = permanent;
+			this.sequence = sequence;
+			this.body = body;
+			this.bytes = bytes;
 		}
 	}
 
 	private final OkHttpClient http;
 	private final Gson gson;
 	private final ScheduledExecutorService executor;
-	private final RecorderEndpoint endpoint;
 	private final Object lock = new Object();
 	private final ArrayDeque<Entry> queue = new ArrayDeque<>();
+	private final List<CompletableFuture<Void>> drained = new ArrayList<>();
+	private final CompletableFuture<Void> opened = new CompletableFuture<>();
+	private final CompletableFuture<Void> finished = new CompletableFuture<>();
 	private final int reserve;
+	private JsonObject header;
+	private String openBody;
 	private long pendingBytes;
 	private int sequence;
+	private Batch batch;
+	private boolean busy;
+	private boolean reopen = true;
+	private boolean rediscover;
+	private int failures;
+	private long finishBy;
 	private ScheduledFuture<?> timer;
-	private CompletableFuture<Void> inFlight;
-	private volatile CompletableFuture<Void> opening;
 	private WebSocket lifetimeSocket;
+	private String lifetimeKey;
+	private int generation;
+	private int lifetimeFailures;
+	private ScheduledFuture<?> redial;
 	private boolean lifetimeClosed;
+	private volatile RecorderEndpoint endpoint;
 	private volatile State state = State.IDLE;
 	private volatile String error = "";
 	private volatile String captureId;
@@ -96,6 +123,8 @@ public final class MccrRecorderClient implements Recorder
 		this.gson = gson;
 		this.executor = executor;
 		this.endpoint = endpoint;
+		// Without one, endpoint.json is read when the app appears.
+		this.rediscover = endpoint == null;
 		this.reserve = Math.min(4096, MAX_PENDING_BYTES / 4);
 	}
 
@@ -130,6 +159,16 @@ public final class MccrRecorderClient implements Recorder
 		return studioRequested;
 	}
 
+	/** It was live, and the app or the lifetime socket went away; it is being tried again. */
+	public boolean reconnecting()
+	{
+		synchronized (lock)
+		{
+			boolean live = state == State.READY || state == State.FINISHING;
+			return live && (failures > 0 || lifetimeFailures > 0);
+		}
+	}
+
 	public CompletableFuture<Void> open(JsonObject header)
 	{
 		synchronized (lock)
@@ -139,42 +178,9 @@ public final class MccrRecorderClient implements Recorder
 				return CompletableFuture.completedFuture(null);
 			}
 			state = State.OPENING;
+			this.header = header;
 		}
-		CompletableFuture<Void> opened = new CompletableFuture<>();
-		opening = opened;
-		executor.execute(() ->
-		{
-			try
-			{
-				JsonObject body = new JsonObject();
-				body.add("header", header);
-				JsonObject result = requestJson("/v1/mccr/open", gson.toJson(body), endpoint.getToken(), true);
-				String id = result.has("id") && result.get("id").isJsonPrimitive() ? result.get("id").getAsString() : "";
-				String cap = result.has("capability") && result.get("capability").isJsonPrimitive() ? result.get("capability").getAsString() : "";
-				int next = result.has("nextSequence") && result.get("nextSequence").isJsonPrimitive() ? result.get("nextSequence").getAsInt() : -1;
-				if (!CAPTURE_ID.matcher(id).matches() || cap.isEmpty() || next != 0)
-				{
-					throw new RecorderException("Invalid local recording acknowledgement.", true);
-				}
-				captureId = id;
-				capability = cap;
-				synchronized (lock)
-				{
-					state = State.READY;
-					if (!queue.isEmpty())
-					{
-						scheduleFlush();
-					}
-				}
-				connectLifetime();
-				opened.complete(null);
-			}
-			catch (Exception e)
-			{
-				fail(e.getMessage() == null ? "Local writer is unavailable; recording stopped." : e.getMessage());
-				opened.completeExceptionally(e);
-			}
-		});
+		run(this::pump);
 		return opened;
 	}
 
@@ -182,6 +188,7 @@ public final class MccrRecorderClient implements Recorder
 	public boolean enqueue(JsonObject record, boolean control)
 	{
 		Entry entry = new Entry(gson.toJson(record));
+		List<CompletableFuture<Void>> stopped;
 		synchronized (lock)
 		{
 			if (state != State.OPENING && state != State.READY)
@@ -189,171 +196,71 @@ public final class MccrRecorderClient implements Recorder
 				return false;
 			}
 			long budget = MAX_PENDING_BYTES - 80 - (control ? 0 : reserve);
-			if (entry.size + 80 > MAX_BATCH_BYTES || pendingBytes + entry.size > budget)
+			if (entry.size + 80 > MAX_BATCH_BYTES)
 			{
-				return false;
+				stopped = failNow("A row was too large for the live view.");
 			}
-			queue.add(entry);
-			pendingBytes += entry.size;
-			if (state == State.READY)
+			else if (pendingBytes + entry.size > budget)
 			{
-				scheduleFlush();
+				stopped = failNow(state == State.OPENING ? "Embertide is not open." : failures > 0 ? "Embertide was away too long." : "Embertide fell behind.");
 			}
-			return true;
+			else
+			{
+				queue.add(entry);
+				pendingBytes += entry.size;
+				if (!busy && timer == null)
+				{
+					timer = schedule(this::pump, FLUSH_MS);
+				}
+				return true;
+			}
 		}
-	}
-
-	private void scheduleFlush()
-	{
-		if (timer == null && inFlight == null)
-		{
-			timer = executor.schedule(() -> flush().exceptionally(ignored -> null), FLUSH_MS, TimeUnit.MILLISECONDS);
-		}
+		settle(stopped);
+		return false;
 	}
 
 	public CompletableFuture<Void> flush()
 	{
+		CompletableFuture<Void> done = new CompletableFuture<>();
 		synchronized (lock)
 		{
-			if (timer != null)
-			{
-				timer.cancel(false);
-				timer = null;
-			}
-			if (inFlight != null)
-			{
-				return inFlight;
-			}
 			if (state == State.FAILED)
 			{
-				CompletableFuture<Void> failed = new CompletableFuture<>();
-				failed.completeExceptionally(new IOException(error));
-				return failed;
+				done.completeExceptionally(new IOException(error));
+				return done;
 			}
-			CompletableFuture<Void> flight = CompletableFuture.runAsync(this::drain, executor);
-			inFlight = flight;
-			flight.whenComplete((ignored, throwable) ->
+			drained.add(done);
+			if (failures > 0)
 			{
-				synchronized (lock)
-				{
-					inFlight = null;
-					if (!queue.isEmpty() && state == State.READY && timer == null)
-					{
-						scheduleFlush();
-					}
-				}
-			});
-			return flight;
-		}
-	}
-
-	private void drain()
-	{
-		try
-		{
-			while (true)
-			{
-				List<Entry> entries = new ArrayList<>();
-				int batchSequence;
-				synchronized (lock)
-				{
-					if (queue.isEmpty())
-					{
-						return;
-					}
-					int size = 80;
-					while (!queue.isEmpty() && entries.size() < MAX_BATCH_RECORDS && size + queue.peek().size <= MAX_BATCH_BYTES)
-					{
-						Entry entry = queue.poll();
-						entries.add(entry);
-						size += entry.size;
-					}
-					if (entries.isEmpty())
-					{
-						entries.add(queue.poll());
-					}
-					batchSequence = sequence;
-				}
-				StringBuilder body = new StringBuilder("{\"sequence\":").append(batchSequence).append(",\"records\":[");
-				long bytes = 0;
-				for (int i = 0; i < entries.size(); i++)
-				{
-					if (i > 0)
-					{
-						body.append(',');
-					}
-					body.append(entries.get(i).json);
-					bytes += entries.get(i).size;
-				}
-				body.append("]}");
-				JsonObject result = requestJson("/v1/mccr/" + captureId + "/append", body.toString(), capability, true);
-				if (!result.has("ack") || !result.get("ack").isJsonPrimitive() || result.get("ack").getAsInt() != batchSequence)
-				{
-					throw new RecorderException("Local writer did not acknowledge the recording sequence.", true);
-				}
-				if (result.has("studioRequested") && result.get("studioRequested").isJsonPrimitive()
-					&& result.get("studioRequested").getAsBoolean())
-				{
-					studioRequested = true;
-				}
-				synchronized (lock)
-				{
-					pendingBytes -= bytes;
-					sequence++;
-				}
+				// The pending retry delivers it.
+				return done;
 			}
 		}
-		catch (Exception e)
-		{
-			fail(e.getMessage() == null ? "Local writer is unavailable; recording stopped." : e.getMessage());
-			throw new IllegalStateException(e);
-		}
+		run(this::pump);
+		return done;
 	}
 
 	public CompletableFuture<Void> finish()
 	{
-		CompletableFuture<Void> pendingOpen;
 		synchronized (lock)
 		{
-			if (state == State.COMPLETE || state == State.FAILED)
+			if (state == State.FAILED)
 			{
-				return state == State.COMPLETE ? CompletableFuture.completedFuture(null) : failedFuture();
+				return failedFuture();
 			}
-			pendingOpen = state == State.OPENING ? opening : null;
-			if (pendingOpen == null)
+			if (state == State.IDLE)
+			{
+				state = State.COMPLETE;
+				finished.complete(null);
+			}
+			if (state == State.OPENING || state == State.READY)
 			{
 				state = State.FINISHING;
+				finishBy = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(FINISH_BUDGET_MS);
 			}
 		}
-		if (pendingOpen != null)
-		{
-			// Wait for the handshake, then drain.
-			return pendingOpen.handle((ignored, throwable) -> throwable == null ? finish() : failedFuture())
-				.thenCompose(future -> future);
-		}
-		return drainUntilEmpty().thenRun(() ->
-		{
-			synchronized (lock)
-			{
-				if (state == State.FINISHING)
-				{
-					state = State.COMPLETE;
-				}
-			}
-		});
-	}
-
-	private CompletableFuture<Void> drainUntilEmpty()
-	{
-		return flush().thenCompose(ignored ->
-		{
-			boolean empty;
-			synchronized (lock)
-			{
-				empty = queue.isEmpty();
-			}
-			return empty ? CompletableFuture.completedFuture(null) : drainUntilEmpty();
-		});
+		run(this::pump);
+		return finished;
 	}
 
 	private CompletableFuture<Void> failedFuture()
@@ -370,21 +277,38 @@ public final class MccrRecorderClient implements Recorder
 		{
 			return failed("This memory is not connected to Studio yet.");
 		}
-		return CompletableFuture.runAsync(() ->
+		CompletableFuture<Void> done = new CompletableFuture<>();
+		http.newCall(post("/v1/mccr/" + captureId + "/studio", "{}", capability)).enqueue(new Callback()
 		{
-			try
+			@Override
+			public void onFailure(Call call, IOException e)
 			{
-				JsonObject result = requestJson("/v1/mccr/" + captureId + "/studio", "{}", capability, true);
-				if (!result.has("ok") || !result.get("ok").isJsonPrimitive() || !result.get("ok").getAsBoolean())
+				done.completeExceptionally(new IOException("Studio did not accept this memory. Please try again."));
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				JsonObject result = null;
+				try (Response r = response)
 				{
-					throw new RecorderException("Studio did not accept this memory. Please try again.", true);
+					result = r.isSuccessful() && r.body() != null ? parse(r.body().string()) : null;
+				}
+				catch (IOException ignored)
+				{
+					// reported below
+				}
+				if (result != null && result.has("ok") && result.get("ok").isJsonPrimitive() && result.get("ok").getAsBoolean())
+				{
+					done.complete(null);
+				}
+				else
+				{
+					done.completeExceptionally(new IOException("Studio did not accept this memory. Please try again."));
 				}
 			}
-			catch (IOException e)
-			{
-				throw new IllegalStateException(e.getMessage(), e);
-			}
-		}, executor);
+		});
+		return done;
 	}
 
 	private static CompletableFuture<Void> failed(String message)
@@ -394,8 +318,11 @@ public final class MccrRecorderClient implements Recorder
 		return future;
 	}
 
-	private void fail(String message)
+	/** Sends the next open or batch, one call at a time. Runs on the executor and never waits on the network. */
+	private void pump()
 	{
+		boolean find;
+		boolean opening;
 		synchronized (lock)
 		{
 			if (timer != null)
@@ -403,163 +330,525 @@ public final class MccrRecorderClient implements Recorder
 				timer.cancel(false);
 				timer = null;
 			}
-			state = State.FAILED;
-			error = message;
+			if (busy || state == State.IDLE || state == State.COMPLETE || state == State.FAILED)
+			{
+				return;
+			}
+			busy = true;
+			opening = reopen;
+			find = reopen && rediscover;
 		}
-		log.debug("recorder failed: {}", message);
+		if (find)
+		{
+			// A restarted app listens on a new port.
+			RecorderEndpoint found = RecorderEndpoint.locate();
+			if (found != null)
+			{
+				endpoint = found;
+			}
+		}
+		if (endpoint == null)
+		{
+			failed(Failure.REOPEN, "Embertide is not open.");
+			return;
+		}
+		Request request;
+		Batch sending = null;
+		if (opening)
+		{
+			if (openBody == null)
+			{
+				JsonObject body = new JsonObject();
+				body.add("header", header);
+				openBody = gson.toJson(body);
+			}
+			request = post("/v1/mccr/open", openBody, endpoint.getToken());
+		}
+		else
+		{
+			sending = nextBatch();
+			if (sending == null)
+			{
+				idle();
+				return;
+			}
+			request = post("/v1/mccr/" + captureId + "/append", sending.body, capability);
+		}
+		Batch sent = sending;
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				run(() -> failed(Failure.REOPEN, "Embertide is not answering."));
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				int code;
+				String text;
+				try (Response r = response)
+				{
+					code = r.code();
+					text = r.body() == null ? "" : r.body().string();
+				}
+				catch (IOException e)
+				{
+					onFailure(call, e);
+					return;
+				}
+				run(() -> answered(opening, sent, code, text));
+			}
+		});
 	}
 
-	private JsonObject requestJson(String path, String body, String token, boolean retry) throws IOException
+	/** The batch still owed, or the next one from the queue; null when nothing is waiting. */
+	private Batch nextBatch()
 	{
-		long started = System.nanoTime();
-		for (int attempt = 0; ; attempt++)
+		List<Entry> entries = new ArrayList<>();
+		int batchSequence;
+		synchronized (lock)
 		{
-			RecorderException failure;
-			try
+			if (batch != null)
 			{
-				Request request = new Request.Builder()
-					.url(endpoint.getUrl() + path)
-					.header("Origin", RecorderEndpoint.ORIGIN)
-					.header("Authorization", "Bearer " + token)
-					.header("Cache-Control", "no-store")
-					.post(RequestBody.create(JSON, body))
-					.build();
-				try (Response response = http.newCall(request).execute())
+				return batch;
+			}
+			if (queue.isEmpty())
+			{
+				return null;
+			}
+			int size = 80;
+			while (!queue.isEmpty() && entries.size() < MAX_BATCH_RECORDS && size + queue.peek().size <= MAX_BATCH_BYTES)
+			{
+				Entry entry = queue.poll();
+				entries.add(entry);
+				size += entry.size;
+			}
+			if (entries.isEmpty())
+			{
+				entries.add(queue.poll());
+			}
+			batchSequence = sequence;
+		}
+		StringBuilder body = new StringBuilder("{\"sequence\":").append(batchSequence).append(",\"records\":[");
+		long bytes = 0;
+		for (int i = 0; i < entries.size(); i++)
+		{
+			if (i > 0)
+			{
+				body.append(',');
+			}
+			body.append(entries.get(i).json);
+			bytes += entries.get(i).size;
+		}
+		body.append("]}");
+		Batch next = new Batch(batchSequence, body.toString(), bytes);
+		synchronized (lock)
+		{
+			batch = next;
+		}
+		return next;
+	}
+
+	/** Nothing to send: release flush waiters, and complete a finishing capture. */
+	private void idle()
+	{
+		List<CompletableFuture<Void>> done;
+		boolean sealed = false;
+		synchronized (lock)
+		{
+			busy = false;
+			if (!queue.isEmpty() || batch != null)
+			{
+				// Rows arrived while this pass was deciding.
+				run(this::pump);
+				return;
+			}
+			done = new ArrayList<>(drained);
+			drained.clear();
+			if (state == State.FINISHING)
+			{
+				state = State.COMPLETE;
+				sealed = true;
+			}
+		}
+		for (CompletableFuture<Void> waiter : done)
+		{
+			waiter.complete(null);
+		}
+		if (sealed)
+		{
+			finished.complete(null);
+		}
+	}
+
+	private void answered(boolean opening, Batch sent, int code, String text)
+	{
+		synchronized (lock)
+		{
+			if (state == State.FAILED)
+			{
+				// Given up while this call was out.
+				busy = false;
+				return;
+			}
+		}
+		if (code < 200 || code >= 300)
+		{
+			boolean retry = code == 408 || code == 429 || (code >= 500 && code != 507);
+			Failure kind;
+			if (code == 403)
+			{
+				// At the first open this app or account will not take it; later the app restarted or is closing.
+				kind = opening && captureId == null ? Failure.PERMANENT : Failure.REOPEN;
+			}
+			else if (retry)
+			{
+				kind = opening ? Failure.REOPEN : Failure.RETRY;
+			}
+			else
+			{
+				kind = Failure.PERMANENT;
+			}
+			JsonObject reply = parse(text);
+			String said = reply == null ? "" : string(reply, "error");
+			failed(kind, said.isEmpty() ? "Embertide refused the live view (HTTP " + code + ")." : said);
+			return;
+		}
+		JsonObject result = parse(text);
+		if (result == null)
+		{
+			failed(Failure.PERMANENT, "Embertide sent an unreadable reply.");
+		}
+		else if (opening)
+		{
+			reopened(result);
+		}
+		else
+		{
+			acknowledged(sent, result);
+		}
+	}
+
+	private void reopened(JsonObject result)
+	{
+		String id = string(result, "id");
+		String cap = string(result, "capability");
+		int next = result.has("nextSequence") && result.get("nextSequence").isJsonPrimitive() ? result.get("nextSequence").getAsInt() : -1;
+		boolean first;
+		List<CompletableFuture<Void>> stopped = null;
+		synchronized (lock)
+		{
+			first = captureId == null;
+			// Back after a restart, the app holds every acknowledged batch and maybe the one whose reply was lost.
+			boolean matches = first ? next == 0 : id.equals(captureId) && (next == sequence || (batch != null && next == sequence + 1));
+			if (!CAPTURE_ID.matcher(id).matches() || cap.isEmpty() || !matches)
+			{
+				stopped = failNow(first ? "Embertide sent an unreadable reply." : "Embertide's copy no longer matches this recording.");
+			}
+			else
+			{
+				captureId = id;
+				capability = cap;
+				reopen = false;
+				rediscover = false;
+				failures = 0;
+				busy = false;
+				if (state == State.OPENING)
 				{
-					int code = response.code();
-					if (!response.isSuccessful())
-					{
-						boolean permanent = code == 507 || (code != 408 && code != 429 && code < 500);
-						throw new RecorderException("Local writer rejected recording (HTTP " + code + ").", permanent);
-					}
-					String text = response.body() == null ? "" : response.body().string();
-					try
-					{
-						JsonElement parsed = new JsonParser().parse(text);
-						if (!parsed.isJsonObject())
-						{
-							throw new IllegalStateException();
-						}
-						return parsed.getAsJsonObject();
-					}
-					catch (RuntimeException e)
-					{
-						throw new RecorderException("Local writer returned an invalid acknowledgement.", true);
-					}
+					state = State.READY;
 				}
 			}
-			catch (RecorderException e)
+		}
+		if (stopped != null)
+		{
+			settle(stopped);
+			return;
+		}
+		if (first)
+		{
+			opened.complete(null);
+		}
+		connectLifetime();
+		pump();
+	}
+
+	private void acknowledged(Batch sent, JsonObject result)
+	{
+		if (!result.has("ack") || !result.get("ack").isJsonPrimitive() || result.get("ack").getAsInt() != sent.sequence)
+		{
+			failed(Failure.PERMANENT, "Embertide did not acknowledge the recording sequence.");
+			return;
+		}
+		if (result.has("studioRequested") && result.get("studioRequested").isJsonPrimitive()
+			&& result.get("studioRequested").getAsBoolean())
+		{
+			studioRequested = true;
+		}
+		synchronized (lock)
+		{
+			pendingBytes -= sent.bytes;
+			sequence++;
+			batch = null;
+			failures = 0;
+			busy = false;
+		}
+		pump();
+	}
+
+	private void failed(Failure kind, String message)
+	{
+		List<CompletableFuture<Void>> stopped;
+		synchronized (lock)
+		{
+			busy = false;
+			if (state == State.FAILED || state == State.COMPLETE)
 			{
-				failure = e;
+				return;
 			}
-			catch (IOException e)
+			if (kind == Failure.PERMANENT)
 			{
-				failure = new RecorderException("Local writer is unavailable; recording stopped.", false);
+				stopped = failNow(message);
 			}
-			long delay = Math.min(500L << Math.min(attempt, 3), 4000L);
-			long elapsed = (System.nanoTime() - started) / 1_000_000L;
-			if (!retry || failure.permanent || elapsed + delay >= RETRY_BUDGET_MS)
+			else if (state == State.FINISHING && System.nanoTime() >= finishBy)
 			{
-				throw failure;
+				stopped = failNow("Embertide did not come back before the recording ended.");
 			}
-			try
+			else
 			{
-				Thread.sleep(delay);
+				failures++;
+				if (kind == Failure.REOPEN)
+				{
+					reopen = true;
+					rediscover = true;
+				}
+				timer = schedule(this::pump, backoff(failures));
+				log.debug("live link retry {}: {}", failures, message);
+				return;
 			}
-			catch (InterruptedException e)
-			{
-				Thread.currentThread().interrupt();
-				throw failure;
-			}
+		}
+		settle(stopped);
+	}
+
+	/** Ends the client. Called holding the lock; the returned waiters are failed outside it. */
+	private List<CompletableFuture<Void>> failNow(String message)
+	{
+		if (timer != null)
+		{
+			timer.cancel(false);
+			timer = null;
+		}
+		state = State.FAILED;
+		error = message;
+		queue.clear();
+		pendingBytes = 0;
+		batch = null;
+		List<CompletableFuture<Void>> waiters = new ArrayList<>(drained);
+		drained.clear();
+		waiters.add(opened);
+		waiters.add(finished);
+		log.debug("recorder failed: {}", message);
+		return waiters;
+	}
+
+	private void settle(List<CompletableFuture<Void>> waiters)
+	{
+		IOException cause = new IOException(error);
+		for (CompletableFuture<Void> waiter : waiters)
+		{
+			waiter.completeExceptionally(cause);
 		}
 	}
 
+	/** 250 ms, doubling to 4 s. */
+	static long backoff(int failures)
+	{
+		return Math.min(250L << Math.min(Math.max(failures, 1) - 1, 4), MAX_BACKOFF_MS);
+	}
+
+	private Request post(String path, String body, String token)
+	{
+		return new Request.Builder()
+			.url(endpoint.getUrl() + path)
+			.header("Origin", RecorderEndpoint.ORIGIN)
+			.header("Authorization", "Bearer " + token)
+			.header("Cache-Control", "no-store")
+			.post(RequestBody.create(JSON, body))
+			.build();
+	}
+
+	private static JsonObject parse(String text)
+	{
+		try
+		{
+			JsonElement parsed = new JsonParser().parse(text);
+			return parsed.isJsonObject() ? parsed.getAsJsonObject() : null;
+		}
+		catch (RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	private static String string(JsonObject object, String key)
+	{
+		return object.has(key) && object.get(key).isJsonPrimitive() ? object.get(key).getAsString() : "";
+	}
+
+	private void run(Runnable task)
+	{
+		try
+		{
+			executor.execute(task);
+		}
+		catch (RejectedExecutionException e)
+		{
+			log.debug("live link stopped with its executor");
+		}
+	}
+
+	private ScheduledFuture<?> schedule(Runnable task, long delayMs)
+	{
+		try
+		{
+			return executor.schedule(task, delayMs, TimeUnit.MILLISECONDS);
+		}
+		catch (RejectedExecutionException e)
+		{
+			return null;
+		}
+	}
+
+	/** Opens the lifetime socket for the current endpoint and capability, unless that one is already up. */
 	private void connectLifetime()
 	{
-		lifetime = Lifetime.CONNECTING;
-		String url = endpoint.getUrl().replaceFirst("^http:", "ws:") + "/v1/mccr/lifetime";
-		Request request = new Request.Builder().url(url).header("Origin", RecorderEndpoint.ORIGIN).build();
-		ScheduledFuture<?> timeout = executor.schedule(() ->
+		WebSocket old;
+		Request request;
+		int mine;
+		String id;
+		String cap;
+		synchronized (lock)
 		{
-			if (lifetime == Lifetime.CONNECTING)
+			String key = endpoint.getUrl() + " " + capability;
+			if (lifetimeClosed || state == State.FAILED || (key.equals(lifetimeKey) && lifetimeSocket != null))
 			{
-				unavailable();
+				return;
 			}
-		}, LIFETIME_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+			if (redial != null)
+			{
+				redial.cancel(false);
+				redial = null;
+			}
+			old = lifetimeSocket;
+			lifetimeSocket = null;
+			lifetimeKey = key;
+			mine = ++generation;
+			lifetime = Lifetime.CONNECTING;
+			id = captureId;
+			cap = capability;
+			String url = endpoint.getUrl().replaceFirst("^http:", "ws:") + "/v1/mccr/lifetime";
+			request = new Request.Builder().url(url).header("Origin", RecorderEndpoint.ORIGIN).build();
+		}
+		if (old != null)
+		{
+			old.cancel();
+		}
 		WebSocket socket = http.newWebSocket(request, new WebSocketListener()
 		{
 			@Override
 			public void onOpen(WebSocket webSocket, Response response)
 			{
 				JsonObject auth = new JsonObject();
-				auth.addProperty("id", captureId);
-				auth.addProperty("capability", capability);
+				auth.addProperty("id", id);
+				auth.addProperty("capability", cap);
 				if (!webSocket.send(gson.toJson(auth)))
 				{
-					unavailable();
+					lost(mine, webSocket);
 				}
 			}
 
 			@Override
 			public void onMessage(WebSocket webSocket, String text)
 			{
-				try
+				JsonObject reply = parse(text);
+				if (reply != null && reply.has("ok") && reply.get("ok").isJsonPrimitive() && reply.get("ok").getAsBoolean())
 				{
-					JsonElement parsed = new JsonParser().parse(text);
-					if (parsed.isJsonObject() && parsed.getAsJsonObject().has("ok")
-						&& parsed.getAsJsonObject().get("ok").getAsBoolean())
+					synchronized (lock)
 					{
-						timeout.cancel(false);
-						lifetime = Lifetime.CONNECTED;
-						return;
+						if (mine == generation)
+						{
+							lifetime = Lifetime.CONNECTED;
+							lifetimeFailures = 0;
+						}
 					}
+					return;
 				}
-				catch (RuntimeException ignored)
-				{
-					// fall through to unavailable
-				}
-				unavailable();
+				lost(mine, webSocket);
+			}
+
+			@Override
+			public void onClosing(WebSocket webSocket, int code, String reason)
+			{
+				webSocket.close(1000, null);
+				lost(mine, webSocket);
 			}
 
 			@Override
 			public void onFailure(WebSocket webSocket, Throwable t, Response response)
 			{
-				timeout.cancel(false);
-				unavailable();
+				lost(mine, webSocket);
 			}
 
 			@Override
 			public void onClosed(WebSocket webSocket, int code, String reason)
 			{
-				timeout.cancel(false);
-				synchronized (lock)
-				{
-					lifetime = lifetimeClosed ? Lifetime.CLOSED : Lifetime.UNAVAILABLE;
-				}
+				lost(mine, webSocket);
 			}
 		});
 		synchronized (lock)
 		{
+			if (mine != generation)
+			{
+				socket.cancel();
+				return;
+			}
 			lifetimeSocket = socket;
 		}
+		schedule(() ->
+		{
+			synchronized (lock)
+			{
+				if (mine != generation || lifetime != Lifetime.CONNECTING)
+				{
+					return;
+				}
+			}
+			socket.cancel();
+		}, LIFETIME_TIMEOUT_MS);
 	}
 
-	private void unavailable()
+	/** Redials a dropped lifetime socket, quickly at first: the app waits a second before it calls the capture ended. */
+	private void lost(int which, WebSocket socket)
 	{
-		WebSocket socket;
 		synchronized (lock)
 		{
-			if (lifetimeClosed)
+			if (which != generation || lifetimeClosed)
 			{
 				return;
 			}
+			generation++;
+			lifetimeSocket = null;
+			lifetimeKey = null;
 			lifetime = Lifetime.UNAVAILABLE;
-			socket = lifetimeSocket;
+			lifetimeFailures++;
+			if (redial != null)
+			{
+				redial.cancel(false);
+			}
+			redial = schedule(this::connectLifetime, backoff(lifetimeFailures));
 		}
-		if (socket != null)
-		{
-			socket.close(1000, "unavailable");
-		}
+		socket.cancel();
 	}
 
 	/** Deliberate close, so it isn't read as a vanished client. */
@@ -571,10 +860,35 @@ public final class MccrRecorderClient implements Recorder
 			lifetimeClosed = true;
 			lifetime = Lifetime.CLOSED;
 			socket = lifetimeSocket;
+			lifetimeSocket = null;
+			generation++;
+			if (redial != null)
+			{
+				redial.cancel(false);
+				redial = null;
+			}
 		}
 		if (socket != null)
 		{
 			socket.close(1000, "done");
+		}
+	}
+
+	/** Gives up the live view: closes the socket and stops trying to reach the app. */
+	public void stop(String because)
+	{
+		closeLifetime();
+		List<CompletableFuture<Void>> stopped = null;
+		synchronized (lock)
+		{
+			if (state != State.FAILED && state != State.COMPLETE)
+			{
+				stopped = failNow(because);
+			}
+		}
+		if (stopped != null)
+		{
+			settle(stopped);
 		}
 	}
 }

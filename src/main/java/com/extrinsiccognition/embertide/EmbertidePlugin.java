@@ -702,11 +702,8 @@ public class EmbertidePlugin extends Plugin
 		}, executor);
 		if (config.liveToApp())
 		{
-			RecorderEndpoint endpoint = RecorderEndpoint.locate();
-			if (endpoint != null)
-			{
-				recorder = new LiveMirror(recorder, new MccrRecorderClient(okHttpClient, gson, executor, endpoint));
-			}
+			// The client finds the app off this thread, and waits for it if it is not open yet.
+			recorder = new LiveMirror(recorder, new MccrRecorderClient(okHttpClient, gson, executor, null));
 		}
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me == null ? null : me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
