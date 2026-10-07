@@ -40,7 +40,8 @@ public final class MccrRecorderClient implements Recorder
 	static final int MAX_PENDING_BYTES = 8 * 1024 * 1024;
 	static final int MAX_BATCH_RECORDS = 256;
 	static final long FLUSH_MS = 250;
-	static final long FINISH_BUDGET_MS = 30_000;
+	// A sealed part waits for the app as long as a live part's rows last at 40 KiB/s.
+	static final long FINISH_BUDGET_MS = 205_000;
 	static final long LIFETIME_TIMEOUT_MS = 5_000;
 	static final long MAX_BACKOFF_MS = 4_000;
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");

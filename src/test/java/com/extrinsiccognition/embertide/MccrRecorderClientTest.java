@@ -189,6 +189,88 @@ public class MccrRecorderClientTest
 	}
 
 	@Test
+	public void sealsAPartWhileTheAppIsAwayOnceItComesBack() throws Exception
+	{
+		FakeApp.Disk disk = new FakeApp.Disk();
+		FakeApp first = app(disk).publish();
+		MccrRecorderClient client = new MccrRecorderClient(http, gson, executor, first.endpoint());
+		client.open(header()).get(5, TimeUnit.SECONDS);
+		rows(client, 0, 10);
+		await(() -> disk.rows.size() == 10, 5_000);
+		first.close();
+		rows(client, 10, 15);
+		JsonObject end = session.record("mccr.capture_end", 9.0, new JsonObject(), OsrsCapture.PLAYER);
+		sent.add(gson.toJson(end));
+		assertTrue(client.enqueue(end, true));
+		CompletableFuture<Void> finished = client.finish();
+		Thread.sleep(2_000);
+		assertEquals(Recorder.State.FINISHING, client.state());
+		app(disk).publish();
+		finished.get(15, TimeUnit.SECONDS);
+		assertEquals(sent, disk.rows);
+		assertEquals(Recorder.State.COMPLETE, client.state());
+	}
+
+	@Test
+	public void aSealedPartWaitsForTheAppAsLongAsALivePartsRowsWouldLast()
+	{
+		// The measured rate the away budget is sized at.
+		long rowsLastMs = MccrRecorderClient.MAX_PENDING_BYTES * 1000L / (40 * 1024);
+		assertTrue("a sealed part gives up after " + MccrRecorderClient.FINISH_BUDGET_MS + " ms, a live part's rows last " + rowsLastMs + " ms",
+			MccrRecorderClient.FINISH_BUDGET_MS >= rowsLastMs);
+	}
+
+	@Test
+	public void aFirstOpenTheAppRefusesEndsTheLiveViewWithTheAppsReason() throws Exception
+	{
+		FakeApp app = app(new FakeApp.Disk());
+		MccrRecorderClient client = new MccrRecorderClient(http, gson, executor,
+			new RecorderEndpoint(app.endpoint().getUrl(), "not-the-pairing-secret", 1));
+		CompletableFuture<Void> opened = client.open(header());
+		await(opened::isDone, 5_000);
+		assertTrue(opened.isCompletedExceptionally());
+		assertEquals(Recorder.State.FAILED, client.state());
+		assertEquals("Recording authentication failed.", client.error());
+		Thread.sleep(1_000);
+		assertEquals(1, app.opens.size());
+	}
+
+	@Test
+	public void aRefusalAfterTheCaptureOpenedOpensItAgain() throws Exception
+	{
+		FakeApp app = app(new FakeApp.Disk()).publish();
+		MccrRecorderClient client = new MccrRecorderClient(http, gson, executor, app.endpoint());
+		client.open(header()).get(5, TimeUnit.SECONDS);
+		rows(client, 0, 5);
+		await(() -> app.disk.rows.size() == 5, 5_000);
+		app.forget();
+		rows(client, 5, 10);
+		await(() -> app.disk.rows.size() == 10, 10_000);
+		assertEquals(sent, app.disk.rows);
+		assertEquals(2, app.opens.size());
+		await(() -> app.lifetimeAuths.get() == 2 && client.lifetime() == MccrRecorderClient.Lifetime.CONNECTED, 5_000);
+		assertEquals(Recorder.State.READY, client.state());
+	}
+
+	@Test
+	public void stopGivesUpAClientStillLookingForTheApp() throws Exception
+	{
+		MccrRecorderClient client = new MccrRecorderClient(http, gson, executor, null);
+		CompletableFuture<Void> opened = client.open(header());
+		rows(client, 0, 5);
+		Thread.sleep(300);
+		client.stop("Live view turned off.");
+		assertEquals(Recorder.State.FAILED, client.state());
+		assertEquals("Live view turned off.", client.error());
+		assertTrue(opened.isCompletedExceptionally());
+		assertEquals(MccrRecorderClient.Lifetime.CLOSED, client.lifetime());
+		FakeApp app = app(new FakeApp.Disk()).publish();
+		// Longer than the longest backoff.
+		Thread.sleep(MccrRecorderClient.MAX_BACKOFF_MS + 500);
+		assertEquals(0, app.opens.size());
+	}
+
+	@Test
 	public void sendsTheHeaderAndRowsExactlyAsRecorded() throws Exception
 	{
 		FakeApp app = app(new FakeApp.Disk()).publish();

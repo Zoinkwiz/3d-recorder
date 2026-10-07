@@ -43,7 +43,7 @@ final class FakeApp implements AutoCloseable
 
 	private final Gson gson = new Gson();
 	final Disk disk;
-	final String capability = UUID.randomUUID().toString();
+	volatile String capability = UUID.randomUUID().toString();
 	final List<String> opens = Collections.synchronizedList(new ArrayList<>());
 	final List<String> appends = Collections.synchronizedList(new ArrayList<>());
 	final AtomicInteger lifetimeAuths = new AtomicInteger();
@@ -108,6 +108,12 @@ final class FakeApp implements AutoCloseable
 			}
 			lifetimes.clear();
 		}
+	}
+
+	/** The app no longer knows the capture's capability, as when it is closing or was replaced on this port. */
+	void forget()
+	{
+		capability = UUID.randomUUID().toString();
 	}
 
 	/** The app is gone: nothing listens and every connection resets. */
