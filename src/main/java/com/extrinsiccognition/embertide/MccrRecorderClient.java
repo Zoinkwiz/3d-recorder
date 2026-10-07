@@ -43,13 +43,14 @@ public final class MccrRecorderClient implements Recorder
 
 	private static final class Entry
 	{
-		final String json;
+		/** The row's UTF-8 text and a newline. */
+		final byte[] line;
 		final int size;
 
-		Entry(String json)
+		Entry(byte[] line)
 		{
-			this.json = json;
-			this.size = json.getBytes(StandardCharsets.UTF_8).length + 1;
+			this.line = line;
+			this.size = line.length;
 		}
 	}
 
@@ -66,6 +67,7 @@ public final class MccrRecorderClient implements Recorder
 
 	private final OkHttpClient http;
 	private final Gson gson;
+	private final RowWriter text = new RowWriter();
 	private final ScheduledExecutorService executor;
 	private final RecorderEndpoint endpoint;
 	private final Object lock = new Object();
@@ -120,6 +122,11 @@ public final class MccrRecorderClient implements Recorder
 		return lifetime;
 	}
 
+	Gson gson()
+	{
+		return gson;
+	}
+
 	public String captureId()
 	{
 		return captureId;
@@ -148,7 +155,7 @@ public final class MccrRecorderClient implements Recorder
 			{
 				JsonObject body = new JsonObject();
 				body.add("header", header);
-				JsonObject result = requestJson("/v1/mccr/open", gson.toJson(body), endpoint.getToken(), true);
+				JsonObject result = requestJson("/v1/mccr/open", gson.toJson(body).getBytes(StandardCharsets.UTF_8), endpoint.getToken(), true);
 				String id = result.has("id") && result.get("id").isJsonPrimitive() ? result.get("id").getAsString() : "";
 				String cap = result.has("capability") && result.get("capability").isJsonPrimitive() ? result.get("capability").getAsString() : "";
 				int next = result.has("nextSequence") && result.get("nextSequence").isJsonPrimitive() ? result.get("nextSequence").getAsInt() : -1;
@@ -181,7 +188,13 @@ public final class MccrRecorderClient implements Recorder
 	/** False means refused, which ends the capture. */
 	public boolean enqueue(JsonObject record, boolean control)
 	{
-		Entry entry = new Entry(gson.toJson(record));
+		return enqueue(text.line(gson, record), control);
+	}
+
+	/** A row already written by this client's Gson, with its newline. */
+	boolean enqueue(byte[] line, boolean control)
+	{
+		Entry entry = new Entry(line);
 		synchronized (lock)
 		{
 			if (state != State.OPENING && state != State.READY)
@@ -211,10 +224,37 @@ public final class MccrRecorderClient implements Recorder
 			List<String> rows = new ArrayList<>();
 			for (Entry entry : queue)
 			{
-				rows.add(entry.json);
+				rows.add(new String(entry.line, 0, entry.line.length - 1, StandardCharsets.UTF_8));
 			}
 			return rows;
 		}
+	}
+
+	/** {"sequence":n,"records":[row,row]} from rows that each end in a newline. */
+	static byte[] body(int sequence, List<byte[]> lines)
+	{
+		byte[] head = ("{\"sequence\":" + sequence + ",\"records\":[").getBytes(StandardCharsets.UTF_8);
+		int length = head.length + 2;
+		for (byte[] line : lines)
+		{
+			length += line.length;
+		}
+		byte[] body = new byte[Math.max(head.length + 2, length - 1)];
+		System.arraycopy(head, 0, body, 0, head.length);
+		int at = head.length;
+		for (int i = 0; i < lines.size(); i++)
+		{
+			if (i > 0)
+			{
+				body[at++] = ',';
+			}
+			byte[] line = lines.get(i);
+			System.arraycopy(line, 0, body, at, line.length - 1);
+			at += line.length - 1;
+		}
+		body[at++] = ']';
+		body[at] = '}';
+		return body;
 	}
 
 	private void scheduleFlush()
@@ -288,19 +328,14 @@ public final class MccrRecorderClient implements Recorder
 					}
 					batchSequence = sequence;
 				}
-				StringBuilder body = new StringBuilder("{\"sequence\":").append(batchSequence).append(",\"records\":[");
+				List<byte[]> lines = new ArrayList<>(entries.size());
 				long bytes = 0;
-				for (int i = 0; i < entries.size(); i++)
+				for (Entry entry : entries)
 				{
-					if (i > 0)
-					{
-						body.append(',');
-					}
-					body.append(entries.get(i).json);
-					bytes += entries.get(i).size;
+					lines.add(entry.line);
+					bytes += entry.size;
 				}
-				body.append("]}");
-				JsonObject result = requestJson("/v1/mccr/" + captureId + "/append", body.toString(), capability, true);
+				JsonObject result = requestJson("/v1/mccr/" + captureId + "/append", body(batchSequence, lines), capability, true);
 				if (!result.has("ack") || !result.get("ack").isJsonPrimitive() || result.get("ack").getAsInt() != batchSequence)
 				{
 					throw new RecorderException("Local writer did not acknowledge the recording sequence.", true);
@@ -388,7 +423,7 @@ public final class MccrRecorderClient implements Recorder
 		{
 			try
 			{
-				JsonObject result = requestJson("/v1/mccr/" + captureId + "/studio", "{}", capability, true);
+				JsonObject result = requestJson("/v1/mccr/" + captureId + "/studio", "{}".getBytes(StandardCharsets.UTF_8), capability, true);
 				if (!result.has("ok") || !result.get("ok").isJsonPrimitive() || !result.get("ok").getAsBoolean())
 				{
 					throw new RecorderException("Studio did not accept this memory. Please try again.", true);
@@ -423,7 +458,7 @@ public final class MccrRecorderClient implements Recorder
 		log.debug("recorder failed: {}", message);
 	}
 
-	private JsonObject requestJson(String path, String body, String token, boolean retry) throws IOException
+	private JsonObject requestJson(String path, byte[] body, String token, boolean retry) throws IOException
 	{
 		long started = System.nanoTime();
 		for (int attempt = 0; ; attempt++)

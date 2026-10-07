@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -26,6 +28,11 @@ public final class MccrSession
 	private double lastRecordTime;
 	private LongSupplier nanos = System::nanoTime;
 	private Supplier<Instant> wall = Instant::now;
+	// The rows of a tick share one time; its text is formatted once.
+	private Instant tsBase;
+	private double tsTime = -1;
+	private String ts;
+	private final Map<String, String> sessionIds = new HashMap<>();
 
 	public MccrSession(String dimension, double maxSeconds)
 	{
@@ -77,13 +84,19 @@ public final class MccrSession
 		// that already sampled its time. Keep file order monotonic for the importer.
 		t = Math.max(lastRecordTime, Math.max(0, Math.min(maxSeconds, t)));
 		lastRecordTime = t;
+		if (t != tsTime || capturedAt != tsBase)
+		{
+			ts = capturedAt.plusNanos((long) (t * 1_000_000_000L)).toString();
+			tsTime = t;
+			tsBase = capturedAt;
+		}
 		JsonObject row = new JsonObject();
 		row.addProperty("id", id + ":r" + (++serial));
-		row.addProperty("ts", capturedAt.plusNanos((long) (t * 1_000_000_000L)).toString());
+		row.addProperty("ts", ts);
 		row.addProperty("elapsed_s", t);
 		row.addProperty("source", SOURCE);
 		row.addProperty("confidence", 1);
-		row.addProperty("session_id", id + "/" + user);
+		row.addProperty("session_id", sessionIds.computeIfAbsent(user, who -> id + "/" + who));
 		row.addProperty("user_id", user);
 		row.add("character_id", JsonNull.INSTANCE);
 		JsonObject salience = new JsonObject();
