@@ -24,26 +24,46 @@ public class RaidTickBench
 	static final class Result
 	{
 		final int actors;
-		final double meanMicros, p99Micros, tickMicros, cycleMicros, cycleP99Micros, bytes, calls, rows;
+		final double cpuMean, cpuP99, frameMean, frameP99, cycleMean, cycleP99, wallMean, wallP99, bytes, calls, rows;
 
-		Result(int actors, long[] nanos, long[] tickNanos, long[] cycleNanos, double bytes, double calls, double rows)
+		Result(int actors, Clock window, Clock frame, Clock cycle, double bytes, double calls, double rows)
 		{
 			this.actors = actors;
-			this.meanMicros = mean(nanos) / 1000;
-			this.p99Micros = p99(nanos) / 1000;
-			this.tickMicros = mean(tickNanos) / 1000;
-			this.cycleMicros = mean(cycleNanos) / 1000;
-			this.cycleP99Micros = p99(cycleNanos) / 1000;
+			cpuMean = mean(window.cpu) / 1000;
+			cpuP99 = p99(window.cpu) / 1000;
+			frameMean = mean(frame.cpu) / 1000;
+			frameP99 = p99(frame.cpu) / 1000;
+			cycleMean = mean(cycle.cpu) / 1000;
+			cycleP99 = p99(cycle.cpu) / 1000;
+			wallMean = mean(window.wall) / 1000;
+			wallP99 = p99(window.wall) / 1000;
 			this.bytes = bytes;
 			this.calls = calls;
 			this.rows = rows;
 		}
 
+		static String heading()
+		{
+			return "actors | cpu us a tick, mean p99 | game-tick frame | client cycle | wall us, mean p99 | bytes a tick | client calls | rows";
+		}
+
 		@Override
 		public String toString()
 		{
-			return String.format(Locale.ROOT, "%2d actors | %8.1f | %8.1f | %7.1f | %6.1f | %6.1f | %9.0f | %6.0f | %5.1f",
-				actors, meanMicros, p99Micros, tickMicros, cycleMicros, cycleP99Micros, bytes, calls, rows);
+			return String.format(Locale.ROOT, "%6d | %7.0f %7.0f | %6.0f %6.0f | %5.1f %5.1f | %7.0f %7.0f | %9.0f | %6.0f | %5.1f",
+				actors, cpuMean, cpuP99, frameMean, frameP99, cycleMean, cycleP99, wallMean, wallP99, bytes, calls, rows);
+		}
+	}
+
+	/** Thread CPU and wall time per sample. */
+	static final class Clock
+	{
+		final long[] cpu, wall;
+
+		Clock(int samples)
+		{
+			cpu = new long[samples];
+			wall = new long[samples];
 		}
 	}
 
@@ -51,13 +71,16 @@ public class RaidTickBench
 	public void aRaidTickStaysInItsBudget()
 	{
 		Result raid = run(30, 40, 40);
-		assertTrue("rows " + raid.rows, raid.rows > 30);
+		// A game tick at 30 actors, with its 30 client cycles: 2.6 MB and 22,300 client calls before these were cut.
+		assertTrue("bytes a tick " + raid.bytes, raid.bytes < 1_500_000);
+		assertTrue("client calls a tick " + raid.calls, raid.calls < 12_000);
 	}
 
 	public static void main(String[] args)
 	{
 		int ticks = args.length > 0 ? Integer.parseInt(args[0]) : 300;
-		System.out.println("per game tick (600 ms of play): mean us | p99 us | tick us | cycle us | cycle p99 us | bytes | client calls | rows");
+		System.out.println("A game tick is 600 ms of play: the tick, its events and its 30 client cycles. The game-tick frame is the tick and its events.");
+		System.out.println(Result.heading());
 		for (int actors : new int[]{1, 8, 30})
 		{
 			run(actors, ticks, ticks);
@@ -74,7 +97,7 @@ public class RaidTickBench
 		capture.start();
 		capture.tick(true);
 		capture.clientTick();
-		long[] nanos = new long[ticks], tickNanos = new long[ticks], cycleNanos = new long[ticks * RaidScene.CYCLES_PER_TICK];
+		Clock window = new Clock(ticks), frame = new Clock(ticks), cycles = new Clock(ticks * RaidScene.CYCLES_PER_TICK);
 		long bytes = 0, calls = 0, rows = 0;
 		long overhead = allocated();
 		overhead = allocated() - overhead;
@@ -82,45 +105,47 @@ public class RaidTickBench
 		{
 			// The app has not answered yet, so the live queue fills: start a fresh pair before it does.
 			if (i % 4 == 0) { recorder.swap(capture); }
-			boolean measured = i >= warmup;
 			int at = i - warmup;
 			scene.serverTick();
 			long calls0 = scene.calls, rows0 = recorder.rows;
-			long b0 = allocated(), t0 = System.nanoTime();
+			long b0 = allocated(), c0 = cpu(), w0 = System.nanoTime();
 			capture.tick(false);
 			scene.tickEvents(capture);
-			long spent = System.nanoTime() - t0, made = allocated() - b0 - overhead;
-			long counted = scene.calls - calls0, written = recorder.rows - rows0;
-			if (measured) { tickNanos[at] = spent; }
+			long wall = System.nanoTime() - w0, used = cpu() - c0, made = allocated() - b0 - overhead;
+			if (at >= 0) { frame.cpu[at] = used; frame.wall[at] = wall; }
 			for (int c = 0; c < RaidScene.CYCLES_PER_TICK; c++)
 			{
 				scene.clientCycle();
-				long cycleCalls = scene.calls, cycleRows = recorder.rows;
-				long cb = allocated(), ct = System.nanoTime();
+				long cb = allocated(), cc = cpu(), cw = System.nanoTime();
 				capture.clientTick();
 				scene.cycleEvents(capture);
-				long cycle = System.nanoTime() - ct;
+				long cycleWall = System.nanoTime() - cw, cycleCpu = cpu() - cc;
 				made += allocated() - cb - overhead;
-				counted += scene.calls - cycleCalls;
-				written += recorder.rows - cycleRows;
-				spent += cycle;
-				if (measured) { cycleNanos[at * RaidScene.CYCLES_PER_TICK + c] = cycle; }
+				wall += cycleWall;
+				used += cycleCpu;
+				if (at >= 0) { cycles.cpu[at * RaidScene.CYCLES_PER_TICK + c] = cycleCpu; cycles.wall[at * RaidScene.CYCLES_PER_TICK + c] = cycleWall; }
 			}
-			if (measured)
+			if (at >= 0)
 			{
-				nanos[at] = spent;
+				window.cpu[at] = used;
+				window.wall[at] = wall;
 				bytes += made;
-				calls += counted;
-				rows += written;
+				calls += scene.calls - calls0;
+				rows += recorder.rows - rows0;
 			}
 		}
 		if (!capture.recording()) { throw new IllegalStateException("the capture stopped: " + capture.reason()); }
-		return new Result(actors, nanos, tickNanos, cycleNanos, bytes / (double) ticks, calls / (double) ticks, rows / (double) ticks);
+		return new Result(actors, window, frame, cycles, bytes / (double) ticks, calls / (double) ticks, rows / (double) ticks);
 	}
 
 	private static long allocated()
 	{
 		return THREADS.getThreadAllocatedBytes(Thread.currentThread().getId());
+	}
+
+	private static long cpu()
+	{
+		return THREADS.getCurrentThreadCpuTime();
 	}
 
 	private static double mean(long[] values)
