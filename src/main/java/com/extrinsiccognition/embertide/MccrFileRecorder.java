@@ -10,7 +10,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -63,6 +62,7 @@ public final class MccrFileRecorder implements Recorder
 	static final String MOTION_XY = "delta-milli";
 	private final Map<String, long[]> lastXY = new HashMap<>();
 	private boolean compact;
+	private final RowWriter text = new RowWriter();
 
 	public MccrFileRecorder(Gson gson, Filepath directory, Supplier<String> stem, Executor worker)
 	{
@@ -80,6 +80,11 @@ public final class MccrFileRecorder implements Recorder
 
 	@Override
 	public synchronized State state() { return state; }
+
+	Gson gson() { return gson; }
+
+	/** The row's text as this recorder writes it, so a mirror can send the same bytes. */
+	byte[] line(JsonObject record) { return text.line(gson, record); }
 
 	@Override
 	public synchronized String error() { return error; }
@@ -131,14 +136,24 @@ public final class MccrFileRecorder implements Recorder
 		{
 			return false;
 		}
-		byte[] row = (gson.toJson(record) + '\n').getBytes(StandardCharsets.UTF_8);
+		return enqueue(record, line(record), control);
+	}
+
+	/** The row with its text from {@link #line}. */
+	synchronized boolean enqueue(JsonObject record, byte[] line, boolean control)
+	{
+		if (state != State.READY || (full && !control))
+		{
+			return false;
+		}
+		byte[] row = line;
 		// The budget counts rows as readers expand them, so the desktop's limit still holds.
 		int plain = row.length;
 		Map<String, long[]> moved = compact ? new HashMap<>() : null;
 		JsonObject compacted = moved == null ? null : compactMotion(record, moved);
 		if (compacted != null)
 		{
-			row = (gson.toJson(compacted) + '\n').getBytes(StandardCharsets.UTF_8);
+			row = text.line(gson, compacted);
 		}
 		if (bytes + plain > capacity - (control ? 0 : END_RESERVE)
 			|| count >= MAX_RECORDS + (control ? 1 : 0))
@@ -169,7 +184,7 @@ public final class MccrFileRecorder implements Recorder
 		return true;
 	}
 
-	/** A copy of an osrs.motion row with x and y as thousandths, or null for any other row. */
+	/** An osrs.motion row with x and y as thousandths, sharing the rest with the row; null for any other row. */
 	private JsonObject compactMotion(JsonObject record, Map<String, long[]> moved)
 	{
 		JsonElement type = record.get("type");
@@ -179,21 +194,38 @@ public final class MccrFileRecorder implements Recorder
 		{
 			return null;
 		}
-		JsonObject copy = record.deepCopy();
-		for (JsonElement element : copy.getAsJsonObject("payload").getAsJsonArray("samples"))
+		JsonArray samples = new JsonArray();
+		for (JsonElement element : payload.getAsJsonObject().getAsJsonArray("samples"))
 		{
 			JsonArray sample = element.isJsonArray() ? element.getAsJsonArray() : null;
 			if (sample == null || sample.size() < 3 || !isString(sample.get(0)) || !isNumber(sample.get(1)) || !isNumber(sample.get(2)))
 			{
+				samples.add(element);
 				continue;
 			}
 			String id = sample.get(0).getAsString();
 			long x = Math.round(sample.get(1).getAsDouble() * 1000.0);
 			long y = Math.round(sample.get(2).getAsDouble() * 1000.0);
 			long[] seen = moved.containsKey(id) ? moved.get(id) : lastXY.get(id);
-			sample.set(1, new JsonPrimitive(seen == null ? x : x - seen[0]));
-			sample.set(2, new JsonPrimitive(seen == null ? y : y - seen[1]));
+			JsonArray compacted = new JsonArray(sample.size());
+			for (int i = 0; i < sample.size(); i++)
+			{
+				compacted.add(i == 1 ? new JsonPrimitive(seen == null ? x : x - seen[0])
+					: i == 2 ? new JsonPrimitive(seen == null ? y : y - seen[1]) : sample.get(i));
+			}
+			samples.add(compacted);
 			moved.put(id, new long[]{x, y});
+		}
+		return replaced(record, "payload", replaced(payload.getAsJsonObject(), "samples", samples));
+	}
+
+	/** A shallow copy with one member replaced, members in the same order. */
+	private static JsonObject replaced(JsonObject object, String key, JsonElement value)
+	{
+		JsonObject copy = new JsonObject();
+		for (Map.Entry<String, JsonElement> member : object.entrySet())
+		{
+			copy.add(member.getKey(), key.equals(member.getKey()) ? value : member.getValue());
 		}
 		return copy;
 	}

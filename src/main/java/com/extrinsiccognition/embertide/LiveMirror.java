@@ -10,6 +10,8 @@ public final class LiveMirror implements Recorder
 {
 	private final Recorder file;
 	private final MccrRecorderClient live;
+	/** The file, when it and the client share a Gson: each row is then written once for both. */
+	private final MccrFileRecorder shared;
 	private volatile boolean mirroring = true;
 	private volatile String stoppedBecause = "";
 
@@ -17,11 +19,17 @@ public final class LiveMirror implements Recorder
 	{
 		this.file = file;
 		this.live = live;
+		this.shared = file instanceof MccrFileRecorder && ((MccrFileRecorder) file).gson() == live.gson() ? (MccrFileRecorder) file : null;
 	}
 
 	public Recorder file()
 	{
 		return file;
+	}
+
+	MccrRecorderClient live()
+	{
+		return live;
 	}
 
 	public String liveNote()
@@ -82,11 +90,13 @@ public final class LiveMirror implements Recorder
 	@Override
 	public boolean enqueue(JsonObject record, boolean control)
 	{
+		byte[] line = shared == null ? null : shared.line(record);
 		if (mirroring)
 		{
 			try
 			{
-				if (!live.enqueue(record.deepCopy(), control))
+				// The client writes the row's text before it returns, so the row needs no copy.
+				if (!(line == null ? live.enqueue(record, control) : live.enqueue(line, control)))
 				{
 					stopMirroring(live.error().isEmpty() ? "Embertide stopped taking rows." : live.error());
 				}
@@ -96,7 +106,7 @@ public final class LiveMirror implements Recorder
 				stopMirroring("Embertide stopped taking rows.");
 			}
 		}
-		return file.enqueue(record, control);
+		return line == null ? file.enqueue(record, control) : shared.enqueue(record, line, control);
 	}
 
 	@Override
