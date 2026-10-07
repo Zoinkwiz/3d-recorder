@@ -977,7 +977,8 @@ public final class OsrsCapture
 			+ "osrs.projectile {graphic, source, target, from, to, start_in, end_in, start_height, end_height, slope, start_pos} once per projectile, times in seconds after the row; "
 			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound; "
 			+ "osrs.audio {master, sounds, area_sounds} at the start and on any change, the game's volumes from 0 to 100: "
-			+ "the client plays no sound effect while master or sounds is 0 and no area sound while master or area_sounds is 0, so those leave no osrs.sound row");
+			+ "the client plays no sound effect while round(127 x sounds/100 x master/100) is 0 and no area sound while the same with area_sounds is 0, "
+			+ "so a volume of 0, or two whose product is under 40, leaves no osrs.sound row");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
