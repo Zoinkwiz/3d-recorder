@@ -1683,13 +1683,14 @@ public final class OsrsCapture
 		emit("osrs.vitals", t, payload, PLAYER, false);
 	}
 
-	/** The game's volumes, 0 to 100, on change; the client neither plays nor reports a sound at volume 0. */
+	/** The game's volumes, 0 to 100, on change; the client neither plays nor reports a sound its volumes round to silence. */
 	private void audio(double t)
 	{
 		net.runelite.api.Preferences preferences = client.getPreferences();
 		if (preferences == null) { return; }
 		int[] now = {
-			client.getVarbitValue(VarbitID.OPTION_MASTER_VOLUME_DESKTOP),
+			// The slider and mute button set this varp; OPTION_MASTER_VOLUME_DESKTOP is a saved copy the client never reads.
+			client.getVarpValue(VarPlayerID.OPTION_MASTER_VOLUME),
 			preferences.getSoundEffectVolume(),
 			preferences.getAreaSoundEffectVolume(),
 		};

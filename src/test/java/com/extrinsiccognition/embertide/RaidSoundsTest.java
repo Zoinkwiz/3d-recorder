@@ -82,13 +82,32 @@ public class RaidSoundsTest
 		scene.serverTick();
 		capture.tick(false);
 
-		List<String> audio = rows.of("osrs.audio").stream().map(row ->
+		assertEquals(List.of("100/45/25", "0/45/25", "70/45/60"), volumes(rows));
+		assertTrue(rows.header.getAsJsonObject("osrs").get("records").getAsString().contains("osrs.audio {master, sounds, area_sounds}"));
+	}
+
+	@Test
+	public void masterIsTheVolumeTheClientApplies()
+	{
+		RaidScene scene = new RaidScene(8, 3);
+		scene.savedMasterVolume = 0;
+		Rows rows = new Rows();
+		OsrsCapture capture = scene.capture(rows);
+		capture.start();
+		capture.tick(true);
+		scene.masterVolume = 0;
+		scene.serverTick();
+		capture.tick(false);
+		assertEquals(List.of("100/45/25", "0/45/25"), volumes(rows));
+	}
+
+	private static List<String> volumes(Rows rows)
+	{
+		return rows.of("osrs.audio").stream().map(row ->
 		{
 			JsonObject p = payload(row);
 			return p.get("master").getAsInt() + "/" + p.get("sounds").getAsInt() + "/" + p.get("area_sounds").getAsInt();
 		}).collect(Collectors.toList());
-		assertEquals(List.of("100/45/25", "0/45/25", "70/45/60"), audio);
-		assertTrue(rows.header.getAsJsonObject("osrs").get("records").getAsString().contains("osrs.audio {master, sounds, area_sounds}"));
 	}
 
 	private static AreaSoundEffectPlayed area(Actor source, int sound, int sceneX, int sceneY, int range)

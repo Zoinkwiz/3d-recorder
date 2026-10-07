@@ -29,6 +29,7 @@ import net.runelite.api.WallObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 
 /**
@@ -59,6 +60,8 @@ final class RaidScene
 	int hp = 99;
 	int cameraYaw = 512;
 	int masterVolume = 100, soundVolume = 45, areaSoundVolume = 25;
+	// The desktop copy the server saves; the slider and mute button leave it alone.
+	int savedMasterVolume = 100;
 	final Client client;
 	final WorldView view;
 	final EmbertideConfig config;
@@ -169,8 +172,8 @@ final class RaidScene
 				case "getBoostedSkillLevel": return box(args[0] == Skill.HITPOINTS ? hp : 90);
 				case "getRealSkillLevel": return box(99);
 				case "getEnergy": return box(8000);
-				case "getVarpValue": return box(1000);
-				case "getVarbitValue": return box((Integer) args[0] == VarbitID.OPTION_MASTER_VOLUME_DESKTOP ? masterVolume : 0);
+				case "getVarpValue": return box((Integer) args[0] == VarPlayerID.OPTION_MASTER_VOLUME ? masterVolume : 1000);
+				case "getVarbitValue": return box((Integer) args[0] == VarbitID.OPTION_MASTER_VOLUME_DESKTOP ? savedMasterVolume : 0);
 				case "getPreferences": return preferences;
 				case "getObjectDefinition": return rock;
 				case "getRevision": return box(236);
