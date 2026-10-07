@@ -24,6 +24,11 @@ public final class LiveMirror implements Recorder
 		return file;
 	}
 
+	MccrRecorderClient live()
+	{
+		return live;
+	}
+
 	public String liveNote()
 	{
 		if (!stoppedBecause.isEmpty())

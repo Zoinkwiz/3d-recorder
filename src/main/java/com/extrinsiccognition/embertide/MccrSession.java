@@ -5,6 +5,8 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 public final class MccrSession
 {
@@ -22,6 +24,8 @@ public final class MccrSession
 	private final double maxSeconds;
 	private int serial;
 	private double lastRecordTime;
+	private LongSupplier nanos = System::nanoTime;
+	private Supplier<Instant> wall = Instant::now;
 
 	public MccrSession(String dimension, double maxSeconds)
 	{
@@ -37,9 +41,16 @@ public final class MccrSession
 		this.startedNanos = startedNanos;
 	}
 
+	/** Tests drive the clock. */
+	void clock(LongSupplier nanos, Supplier<Instant> wall)
+	{
+		this.nanos = nanos;
+		this.wall = wall;
+	}
+
 	public void rebase()
 	{
-		rebase(Instant.now(), System.nanoTime());
+		rebase(wall.get(), nanos.getAsLong());
 	}
 
 	void rebase(Instant capturedAt, long startedNanos)
@@ -50,7 +61,7 @@ public final class MccrSession
 
 	public double time()
 	{
-		return time(System.nanoTime());
+		return time(nanos.getAsLong());
 	}
 
 	double time(long nowNanos)

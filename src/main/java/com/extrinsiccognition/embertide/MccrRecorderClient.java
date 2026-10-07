@@ -203,6 +203,20 @@ public final class MccrRecorderClient implements Recorder
 		}
 	}
 
+	/** The rows waiting to be sent, as they will be sent. */
+	List<String> queued()
+	{
+		synchronized (lock)
+		{
+			List<String> rows = new ArrayList<>();
+			for (Entry entry : queue)
+			{
+				rows.add(entry.json);
+			}
+			return rows;
+		}
+	}
+
 	private void scheduleFlush()
 	{
 		if (timer == null && inFlight == null)

@@ -160,6 +160,11 @@ public final class OsrsCapture
 		return session.dimension;
 	}
 
+	MccrSession session()
+	{
+		return session;
+	}
+
 
 	private final Map<Skill, Integer> levels = new EnumMap<>(Skill.class);
 	/** Throttled per NPC name. */
