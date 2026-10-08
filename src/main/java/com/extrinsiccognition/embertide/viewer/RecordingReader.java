@@ -8,6 +8,7 @@ import com.extrinsiccognition.embertide.GroundRows;
 import com.extrinsiccognition.embertide.MccrFileRecorder;
 import com.extrinsiccognition.embertide.MccrSession;
 import com.extrinsiccognition.embertide.RowTypes;
+import com.extrinsiccognition.embertide.SceneMapper;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.FilterInputStream;
@@ -188,15 +189,16 @@ final class RecordingReader
 					JsonArray a = e.getAsJsonArray();
 					if (a.size() < 4) { throw new IllegalArgumentException("Short ground cell"); }
 					String material = a.get(3).getAsString();
-					if (!material.startsWith("osrs:underlay:") && !material.startsWith("osrs:overlay:") && !"osrs:ground".equals(material)) { continue; }
+					// Cells are (x, plane * 8 + elevation, -y) as SceneMapper writes them; osrs:ground is an older recorder's.
+					if (!material.startsWith(SceneMapper.UNDERLAY) && !material.startsWith(SceneMapper.OVERLAY) && !"osrs:ground".equals(material)) { continue; }
 					if (!"osrs:ground".equals(material))
 					{
 						int materialId = Integer.parseInt(material.substring(material.lastIndexOf(':') + 1));
 						if (materialId < 0 || materialId > 65535) { throw new IOException("Invalid ground material ID"); }
 					}
 					if (++cells > 100_000) { throw new IOException("Too many ground cells."); }
-					int x = (int) num(a, 0), y = -(int) num(a, 2), h = (int) num(a, 1), plane = plane(Math.floorDiv(h, 8));
-					s.ground.put(groundKey(x, y, plane), new Ground(x, y, plane, (h - plane * 8) * 128.0, material));
+					int x = (int) num(a, 0), y = -(int) num(a, 2), h = (int) num(a, 1), plane = plane(Math.floorDiv(h, SceneMapper.PLANE_HEIGHT));
+					s.ground.put(groundKey(x, y, plane), new Ground(x, y, plane, (h - plane * SceneMapper.PLANE_HEIGHT) * (double) SceneMapper.LOCAL_TILE_SIZE, material));
 				}
 				break;
 			case RowTypes.OBJECT:

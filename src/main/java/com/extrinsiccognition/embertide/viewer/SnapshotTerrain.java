@@ -3,6 +3,8 @@ package com.extrinsiccognition.embertide.viewer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.IntFunction;
+import static com.extrinsiccognition.embertide.SceneMapper.OVERLAY;
+import static com.extrinsiccognition.embertide.SceneMapper.UNDERLAY;
 
 /**
  * Floor for a scene recorded before osrs.ground rows: its spatial snapshot cells, which name each tile's underlay or
@@ -14,7 +16,6 @@ import java.util.function.IntFunction;
 final class SnapshotTerrain
 {
 	static final int BLEND = 5;
-	private static final String UNDERLAY = "osrs:underlay:", OVERLAY = "osrs:overlay:";
 
 	private SnapshotTerrain() { }
 
