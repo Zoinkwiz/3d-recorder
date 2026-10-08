@@ -20,6 +20,7 @@ import net.runelite.api.DecorativeObject;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
 import net.runelite.api.GraphicsObject;
+import net.runelite.api.HeadIcon;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.ObjectComposition;
@@ -189,6 +190,12 @@ public final class OsrsCapture
 	private int[] lastCamera;
 	private int[] lastVitals;
 	private int[] lastAudio;
+	/** Per actor, the head icons last written: prayer, skull, then archive and sprite pairs. */
+	private final Map<String, int[]> headIcons = new HashMap<>();
+	private int headIconCount;
+	private int[] lastBossHp;
+	private String lastBossActor;
+	private int bossHpCount;
 	private int cameraCount;
 	// Camera rows land on every change, roughly ten a second while turning.
 	private static final int MAX_CAMERA = 4_000_000;
@@ -978,7 +985,14 @@ public final class OsrsCapture
 			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound; "
 			+ "osrs.audio {master, sounds, area_sounds} at the start and on any change, the game's volumes from 0 to 100: "
 			+ "the client plays no sound effect while round(127 x sounds/100 x master/100) is 0 and no area sound while the same with area_sounds is 0, "
-			+ "so a volume of 0, or two whose product is under 40, leaves no osrs.sound row");
+			+ "so a volume of 0, or two whose product is under 40, leaves no osrs.sound row; "
+			+ "osrs.head_icons {icons [[actor, prayer, skull, archive, sprite, ...]]} for the actors whose head icons changed that tick, "
+			+ "each entry the actor's whole set until its next entry, scene changes included, and none at the start of a part: "
+			+ "prayer is the frame of sprite 440 (headicons_prayer, 0 to 14) and skull the frame of sprite 439 (headicons_pk), -1 for none, players only; "
+			+ "an NPC's head icons follow as sprite archive and frame pairs; "
+			+ "osrs.boss_hp {shown, npc_id, hp, max, boss, markers, actor} on any change from the first tick the client's HP bar at the top of the screen is shown or its max is above 0: "
+			+ "npc_id the NPC type it is for or -1, boss true for the boss layout, markers its four marker lines (lower threshold, upper threshold, then two more) "
+			+ "each at hp = value - 1 and 0 for none, actor the recorded actor when it is the player's target or the only NPC of that type in the picture");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
@@ -1148,6 +1162,7 @@ public final class OsrsCapture
 		}
 		appearance(me, PLAYER, t);
 		pose(view, me, PLAYER, at, t, true, -1);
+		JsonArray icons = headIcon(null, me, PLAYER);
 		JsonArray crowd = new JsonArray();
 		int npcsSeen = 0;
 		int playersSeen = 0;
@@ -1165,6 +1180,7 @@ public final class OsrsCapture
 				{
 					npcVariant(npc, id, t);
 					crowdPose(crowd, view, me, npc, id, npc.getWorldLocation(), npc.getId());
+					icons = headIcon(icons, npc, id);
 					npcsSeen++;
 				}
 			}
@@ -1175,6 +1191,7 @@ public final class OsrsCapture
 				{
 					appearance(player, id, t);
 					crowdPose(crowd, view, me, player, id, player.getWorldLocation(), -1);
+					icons = headIcon(icons, player, id);
 					playersSeen++;
 				}
 			}
@@ -1194,6 +1211,14 @@ public final class OsrsCapture
 				poseCount += crowd.size();
 			}
 		}
+		if (icons != null && recording && headIconCount < MAX_HITS)
+		{
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", session.dimension);
+			payload.add("icons", icons);
+			if (emit("osrs.head_icons", t, payload, PLAYER, false)) { headIconCount += icons.size(); }
+		}
+		if (recording) { bossHp(me, t); }
 		if (rediscover && recording && scene != null)
 		{
 			emit("osrs.scene_loaded", t, sceneLoaded(client.getTickCount(), view.getBaseX(), view.getBaseY(), at,
@@ -1706,6 +1731,142 @@ public final class OsrsCapture
 		payload.addProperty("area_sounds", now[2]);
 		payload.addProperty("dimension", session.dimension);
 		emit("osrs.audio", t, payload, PLAYER, false);
+	}
+
+	/** Adds [id, prayer, skull, archive and sprite pairs] to changed, made on first use, when they differ from the last written. */
+	private JsonArray headIcon(JsonArray changed, Actor actor, String id)
+	{
+		int prayer = -1, skull = -1, pairs = 0;
+		int[] archives = null;
+		short[] sprites = null;
+		if (actor instanceof Player)
+		{
+			prayer = prayerFrame(((Player) actor).getOverheadIcon());
+			skull = Math.max(-1, ((Player) actor).getSkullIcon());
+		}
+		else if (actor instanceof NPC)
+		{
+			archives = ((NPC) actor).getOverheadArchiveIds();
+			sprites = archives == null ? null : ((NPC) actor).getOverheadSpriteIds();
+			for (int i = 0; sprites != null && i < Math.min(archives.length, sprites.length); i++)
+			{
+				if (archives[i] >= 0 && sprites[i] >= 0) { pairs++; }
+			}
+		}
+		int[] last = headIcons.get(id);
+		if (last == null ? prayer < 0 && skull < 0 && pairs == 0 : sameIcons(last, prayer, skull, archives, sprites, pairs))
+		{
+			return changed;
+		}
+		int[] now = new int[2 + 2 * pairs];
+		now[0] = prayer;
+		now[1] = skull;
+		for (int i = 0, at = 2; at < now.length; i++)
+		{
+			if (archives[i] >= 0 && sprites[i] >= 0)
+			{
+				now[at++] = archives[i];
+				now[at++] = sprites[i];
+			}
+		}
+		headIcons.put(id, now);
+		JsonArray entry = new JsonArray(now.length + 1);
+		entry.add(id);
+		for (int value : now) { entry.add(value); }
+		if (changed == null) { changed = new JsonArray(); }
+		changed.add(entry);
+		return changed;
+	}
+
+	private static boolean sameIcons(int[] last, int prayer, int skull, int[] archives, short[] sprites, int pairs)
+	{
+		if (last[0] != prayer || last[1] != skull || last.length != 2 + 2 * pairs) { return false; }
+		for (int i = 0, at = 2; at < last.length; i++)
+		{
+			if (archives[i] < 0 || sprites[i] < 0) { continue; }
+			if (last[at++] != archives[i] || last[at++] != sprites[i]) { return false; }
+		}
+		return true;
+	}
+
+	/** The frame of sprite 440 the client draws for icon, -1 for none; by name, so a reordered enum cannot shift it. */
+	static int prayerFrame(HeadIcon icon)
+	{
+		if (icon == null) { return -1; }
+		switch (icon)
+		{
+			case MELEE: return 0;
+			case RANGED: return 1;
+			case MAGIC: return 2;
+			case RETRIBUTION: return 3;
+			case SMITE: return 4;
+			case REDEMPTION: return 5;
+			case RANGE_MAGE: return 6;
+			case RANGE_MELEE: return 7;
+			case MAGE_MELEE: return 8;
+			case RANGE_MAGE_MELEE: return 9;
+			case WRATH: return 10;
+			case SOUL_SPLIT: return 11;
+			case DEFLECT_MELEE: return 12;
+			case DEFLECT_RANGE: return 13;
+			case DEFLECT_MAGE: return 14;
+			default: return -1;
+		}
+	}
+
+	/** The client's HP bar at the top of the screen, on change from the first tick it is shown or its max is above 0. */
+	private void bossHp(Player me, double t)
+	{
+		net.runelite.api.widgets.Widget bar = client.getWidget(net.runelite.api.gameval.InterfaceID.HpbarHud.HP);
+		int[] now = {
+			bar != null && !bar.isHidden() ? 1 : 0,
+			client.getVarpValue(VarPlayerID.HPBAR_HUD_NPC),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_BASEHP),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_BOSS),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_LOWER_THRESHOLD),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_UPPER_THRESHOLD),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP_1),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP_2),
+		};
+		if (lastBossHp == null && now[0] == 0 && now[3] <= 0) { return; }
+		String actor = now[0] == 1 && now[1] >= 0 ? bossActor(me, now[1]) : null;
+		if (lastBossHp != null && Arrays.equals(lastBossHp, now) && java.util.Objects.equals(actor, lastBossActor)) { return; }
+		if (bossHpCount >= MAX_EVENTS) { return; }
+		lastBossHp = now;
+		lastBossActor = actor;
+		JsonObject payload = new JsonObject();
+		payload.addProperty("shown", now[0] == 1);
+		payload.addProperty("npc_id", now[1]);
+		payload.addProperty("hp", now[2]);
+		payload.addProperty("max", now[3]);
+		payload.addProperty("boss", now[4] == 1);
+		JsonArray markers = new JsonArray(4);
+		for (int i = 5; i < 9; i++) { markers.add(now[i]); }
+		payload.add("markers", markers);
+		if (actor != null) { payload.addProperty("actor", actor); }
+		payload.addProperty("dimension", session.dimension);
+		if (emit("osrs.boss_hp", t, payload, actor == null ? PLAYER : actor, false)) { bossHpCount++; }
+	}
+
+	/** The recorded actor a bar is for: the player's target when it is that NPC, else the only such NPC in the picture. */
+	private String bossActor(Player me, int npcId)
+	{
+		Actor target = me.getInteracting();
+		String id = target instanceof NPC && isNpc((NPC) target, npcId) ? actorIds.get(target) : null;
+		if (id != null) { return actors.contains(id) ? id : null; }
+		for (Actor actor : crowdActors)
+		{
+			if (!(actor instanceof NPC) || !isNpc((NPC) actor, npcId)) { continue; }
+			if (id != null) { return null; }
+			id = actorIds.get(actor);
+		}
+		return id != null && actors.contains(id) ? id : null;
+	}
+
+	private static boolean isNpc(NPC npc, int npcId)
+	{
+		return npc.getId() == npcId || shownNpcId(npc) == npcId;
 	}
 
 	// -1 while hidden

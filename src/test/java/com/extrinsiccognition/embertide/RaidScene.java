@@ -12,6 +12,7 @@ import net.runelite.api.Constants;
 import net.runelite.api.Deque;
 import net.runelite.api.GameObject;
 import net.runelite.api.GraphicsObject;
+import net.runelite.api.HeadIcon;
 import net.runelite.api.Hitsplat;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.NPC;
@@ -29,6 +30,7 @@ import net.runelite.api.WallObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 
@@ -62,6 +64,10 @@ final class RaidScene
 	int masterVolume = 100, soundVolume = 45, areaSoundVolume = 25;
 	// The desktop copy the server saves; the slider and mute button leave it alone.
 	int savedMasterVolume = 100;
+	/** The HP bar at the top of the screen: shown, then its varp and varbits; no bar until a test sets one. */
+	boolean hpBarShown;
+	int hpBarNpc = -1, hpBarHp, hpBarMax, hpBarBoss;
+	final int[] hpBarMarkers = new int[4];
 	final Client client;
 	final WorldView view;
 	final EmbertideConfig config;
@@ -128,6 +134,7 @@ final class RaidScene
 		});
 		Preferences preferences = fake(Preferences.class, (name, args) ->
 			"getSoundEffectVolume".equals(name) ? box(soundVolume) : "getAreaSoundEffectVolume".equals(name) ? box(areaSoundVolume) : null);
+		net.runelite.api.widgets.Widget hpBar = fake(net.runelite.api.widgets.Widget.class, (name, args) -> "isHidden".equals(name) ? !hpBarShown : null);
 		IndexedObjectSet<?> npcs = set(true);
 		IndexedObjectSet<?> players = set(false);
 		Deque<?> graphics = fake(Deque.class, (name, args) -> "iterator".equals(name) ? spotProxies.iterator() : null);
@@ -172,8 +179,9 @@ final class RaidScene
 				case "getBoostedSkillLevel": return box(args[0] == Skill.HITPOINTS ? hp : 90);
 				case "getRealSkillLevel": return box(99);
 				case "getEnergy": return box(8000);
-				case "getVarpValue": return box((Integer) args[0] == VarPlayerID.OPTION_MASTER_VOLUME ? masterVolume : 1000);
-				case "getVarbitValue": return box((Integer) args[0] == VarbitID.OPTION_MASTER_VOLUME_DESKTOP ? savedMasterVolume : 0);
+				case "getVarpValue": return box(varp((Integer) args[0]));
+				case "getVarbitValue": return box(varbit((Integer) args[0]));
+				case "getWidget": return args.length == 1 && (Integer) args[0] == InterfaceID.HpbarHud.HP && (hpBarShown || hpBarMax > 0) ? hpBar : null;
 				case "getPreferences": return preferences;
 				case "getObjectDefinition": return rock;
 				case "getRevision": return box(236);
@@ -194,6 +202,32 @@ final class RaidScene
 				default: return null;
 			}
 		});
+	}
+
+	private int varp(int id)
+	{
+		switch (id)
+		{
+			case VarPlayerID.OPTION_MASTER_VOLUME: return masterVolume;
+			case VarPlayerID.HPBAR_HUD_NPC: return hpBarNpc;
+			default: return 1000;
+		}
+	}
+
+	private int varbit(int id)
+	{
+		switch (id)
+		{
+			case VarbitID.OPTION_MASTER_VOLUME_DESKTOP: return savedMasterVolume;
+			case VarbitID.HPBAR_HUD_HP: return hpBarHp;
+			case VarbitID.HPBAR_HUD_BASEHP: return hpBarMax;
+			case VarbitID.HPBAR_HUD_BOSS: return hpBarBoss;
+			case VarbitID.HPBAR_HUD_LOWER_THRESHOLD: return hpBarMarkers[0];
+			case VarbitID.HPBAR_HUD_UPPER_THRESHOLD: return hpBarMarkers[1];
+			case VarbitID.HPBAR_HUD_HP_1: return hpBarMarkers[2];
+			case VarbitID.HPBAR_HUD_HP_2: return hpBarMarkers[3];
+			default: return 0;
+		}
 	}
 
 	/** A capture of this scene on the scene's own clock. */
@@ -472,6 +506,10 @@ final class RaidScene
 		int orientation = 1024, animation = -1, frame, pose = 808, graphic = -1, healthRatio = -1, healthScale = -1;
 		int animationTicks, cycles;
 		Body interacting;
+		HeadIcon prayer;
+		int skull = -1;
+		int[] iconArchives;
+		short[] iconSprites;
 
 		Body(boolean npc, int slot, String name, int npcId, int combat)
 		{
@@ -513,6 +551,10 @@ final class RaidScene
 					case "getIndex": return box(slot);
 					case "getTransformedComposition": return shown;
 					case "getPlayerComposition": return look;
+					case "getOverheadIcon": return prayer;
+					case "getSkullIcon": return box(skull);
+					case "getOverheadArchiveIds": return iconArchives;
+					case "getOverheadSpriteIds": return iconSprites;
 					default: return null;
 				}
 			};
