@@ -37,7 +37,10 @@ recording.
 ## What is recorded
 
 - Where you and the NPCs and players around you move, what they look like
-  and what they do: animations, hits and deaths.
+  and what they do: animations, projectiles, hits and deaths.
+- The prayer and skull icons over heads, and the health bar the game shows
+  at the top of the screen.
+- The sound effects the game plays, and your game volume settings.
 - The scenery and ground items in the area the game has loaded, and when
   they change.
 - The ground around you, for the block view.
