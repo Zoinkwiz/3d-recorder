@@ -311,6 +311,7 @@ public class Viewer
 	private void onClient(Runnable task)
 	{
 		long epoch = lifecycle.get();
+		if (!enabled) { return; }
 		clientThread.invokeLater(() ->
 		{
 			if (!enabled || epoch != lifecycle.get()) { return; }

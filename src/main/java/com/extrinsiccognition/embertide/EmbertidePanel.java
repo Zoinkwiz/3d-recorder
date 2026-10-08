@@ -17,13 +17,14 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
 import javax.swing.Timer;
+import javax.swing.text.DefaultCaret;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.LinkBrowser;
 
 public final class EmbertidePanel extends PluginPanel
 {
-	private final JTextArea status = new JTextArea();
+	private final JTextArea status = text("");
 	private final JPanel files = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
 	private final JButton folder = new JButton("Show my recordings");
@@ -49,13 +50,7 @@ public final class EmbertidePanel extends PluginPanel
 		title.setAlignmentX(LEFT_ALIGNMENT);
 		top.add(title);
 		top.add(Box.createVerticalStrut(6));
-		JTextArea where = new JTextArea("Play as normal. When you're done, open your session in the Embertide app or at");
-		where.setEditable(false);
-		where.setLineWrap(true);
-		where.setWrapStyleWord(true);
-		where.setOpaque(false);
-		where.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		where.setAlignmentX(LEFT_ALIGNMENT);
+		JTextArea where = text("Play as normal. When you're done, open your session in the Embertide app or at");
 		top.add(where);
 		JLabel studio = new JLabel("<html><u>embertide.gg/studio</u></html>");
 		studio.setForeground(ColorScheme.BRAND_ORANGE);
@@ -76,13 +71,7 @@ public final class EmbertidePanel extends PluginPanel
 		JPanel middle = new JPanel();
 		middle.setLayout(new BoxLayout(middle, BoxLayout.Y_AXIS));
 		middle.setOpaque(false);
-		status.setEditable(false);
-		status.setLineWrap(true);
-		status.setWrapStyleWord(true);
-		status.setOpaque(false);
-		status.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		status.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
-		status.setAlignmentX(LEFT_ALIGNMENT);
 		middle.add(status);
 		files.setLayout(new BoxLayout(files, BoxLayout.Y_AXIS));
 		files.setOpaque(false);
@@ -146,7 +135,10 @@ public final class EmbertidePanel extends PluginPanel
 	private void render(EmbertidePlugin plugin)
 	{
 		EmbertidePlugin.PanelState state = plugin.panelState();
-		status.setText(state.text);
+		if (!state.text.equals(status.getText()))
+		{
+			status.setText(state.text);
+		}
 		recording = state.recording;
 		toggle.setText(recording ? "Stop recording" : "Start recording");
 		toggle.setEnabled(state.canToggle);
@@ -228,6 +220,21 @@ public final class EmbertidePanel extends PluginPanel
 			row.add(link);
 		}
 		return row;
+	}
+
+	/** Read-only text whose caret never scrolls the sidebar when the text changes. */
+	private static JTextArea text(String content)
+	{
+		JTextArea area = new JTextArea(content);
+		area.setEditable(false);
+		area.setFocusable(false);
+		area.setLineWrap(true);
+		area.setWrapStyleWord(true);
+		area.setOpaque(false);
+		area.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		area.setAlignmentX(LEFT_ALIGNMENT);
+		((DefaultCaret) area.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
+		return area;
 	}
 
 	@Override
