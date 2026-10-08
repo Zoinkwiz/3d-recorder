@@ -40,7 +40,8 @@ recording.
   and what they do: animations, hits and deaths.
 - The scenery and ground items in the area the game has loaded, and when
   they change.
-- The ground around you, for the block view.
+- The ground of the area the game has loaded, with its colours, shapes and
+  heights as the game draws them, and the ground around you for the block view.
 - Your camera, so a clip can start from the view you had.
 - Your levels, XP, hitpoints, prayer, run energy and special attack.
 - Your loot, with Grand Exchange prices, and milestone messages from the

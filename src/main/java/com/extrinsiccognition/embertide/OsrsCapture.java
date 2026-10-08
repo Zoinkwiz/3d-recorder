@@ -935,6 +935,10 @@ public final class OsrsCapture
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
 			+ "osrs.scene_loaded once the whole scene is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
+			+ "osrs.ground on each scene load, the loaded scene's ground as the client built it, one row per map plane (bridges keep their own plane) and band of scene columns: "
+			+ "{base_x, base_y, plane, x, columns, tiles, heights, bridges on plane 1}, tiles a column of " + GroundRows.SIZE + " per scene column from x, each 0 for none, "
+			+ "a paint [sw, se - sw, ne - sw, nw - sw] with a fifth texture if it has one, or a shaped tile [-shape, rotation, then colour a, b - a, c - a and texture per face], colours as the client's HSL with 12345678 for hidden; "
+			+ "heights the plane's corner heights for scene columns x to x + columns, each column its first then each corner's difference from the one before; bridges [x, y, ...] the scene tiles whose floors draw one plane down; "
 			+ "osrs.poses entries end with the id of the actor each one is targeting (\"player\" for the local player) or null, and player.position carries osrs.interacting the same way; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
@@ -1084,6 +1088,13 @@ public final class OsrsCapture
 			region(view, t);
 		}
 		if (!recording) { return false; }
+		if (rediscover)
+		{
+			for (JsonObject ground : GroundRows.of(view, session.dimension))
+			{
+				if (!emit("osrs.ground", t, ground, PLAYER, false)) { return false; }
+			}
+		}
 		Scene skyScene = view.getScene();
 		JsonObject sky = sceneSkybox.changed(skyScene == null ? null : skyScene.getSkybox(),
 			client.getTextureProvider() == null ? 0.8 : client.getTextureProvider().getBrightness());
