@@ -990,7 +990,7 @@ public final class OsrsCapture
 			+ "each entry the actor's whole set until its next entry, scene changes included, and none at the start of a part: "
 			+ "prayer is the frame of sprite 440 (headicons_prayer, 0 to 14) and skull the frame of sprite 439 (headicons_pk), -1 for none, players only; "
 			+ "an NPC's head icons follow as sprite archive and frame pairs; "
-			+ "osrs.boss_hp {shown, npc_id, hp, max, boss, markers, actor} on any change once the client's HP bar at the top of the screen has been seen: "
+			+ "osrs.boss_hp {shown, npc_id, hp, max, boss, markers, actor} on any change from the first tick the client's HP bar at the top of the screen is shown or its max is above 0: "
 			+ "npc_id the NPC type it is for or -1, boss true for the boss layout, markers its four marker lines (lower threshold, upper threshold, then two more) "
 			+ "each at hp = value - 1 and 0 for none, actor the recorded actor when it is the player's target or the only NPC of that type in the picture");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
@@ -1814,7 +1814,7 @@ public final class OsrsCapture
 		}
 	}
 
-	/** The client's HP bar at the top of the screen, on change once one has been seen. */
+	/** The client's HP bar at the top of the screen, on change from the first tick it is shown or its max is above 0. */
 	private void bossHp(Player me, double t)
 	{
 		net.runelite.api.widgets.Widget bar = client.getWidget(net.runelite.api.gameval.InterfaceID.HpbarHud.HP);
