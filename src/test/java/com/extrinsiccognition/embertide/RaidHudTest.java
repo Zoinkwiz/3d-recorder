@@ -121,6 +121,52 @@ public class RaidHudTest
 	}
 
 	@Test
+	public void theBarNamesThePlayersTargetAmongOthersOfItsType()
+	{
+		RaidScene scene = new RaidScene(30, 11);
+		Rows rows = new Rows();
+		OsrsCapture capture = started(scene, rows);
+		RaidScene.Body wisp = scene.bodies.get(9);
+		scene.hpBarShown = true;
+		scene.hpBarNpc = wisp.npcId;
+		scene.hpBarMax = 92;
+		scene.hpBarHp = 92;
+		scene.serverTick();
+		scene.self.interacting = wisp;
+		capture.tick(false);
+
+		List<JsonObject> written = rows.of("osrs.boss_hp");
+		assertEquals(1, written.size());
+		assertEquals(14811, written.get(0).getAsJsonObject("payload").get("npc_id").getAsInt());
+		assertEquals(rows.idOf(9009), written.get(0).getAsJsonObject("payload").get("actor").getAsString());
+	}
+
+	@Test
+	public void headIconsHoldAcrossASceneChange()
+	{
+		RaidScene scene = new RaidScene(30, 11);
+		Rows rows = new Rows();
+		OsrsCapture capture = started(scene, rows);
+		scene.self.prayer = HeadIcon.MAGIC;
+		scene.bodies.get(0).iconArchives = new int[]{440};
+		scene.bodies.get(0).iconSprites = new short[]{2};
+		tick(scene, capture, 2);
+		assertEquals(1, rows.of("osrs.head_icons").size());
+
+		int scenes = rows.of("mccr.scene").size();
+		capture.sceneChanged(scene.view);
+		tick(scene, capture, 3);
+		assertEquals(scenes + 1, rows.of("mccr.scene").size());
+		assertEquals(1, rows.of("osrs.head_icons").size());
+
+		scene.self.prayer = null;
+		tick(scene, capture, 1);
+		List<JsonObject> written = rows.of("osrs.head_icons");
+		assertEquals(2, written.size());
+		assertEquals("[[\"player\",-1,-1]]", written.get(1).getAsJsonObject("payload").getAsJsonArray("icons").toString());
+	}
+
+	@Test
 	public void prayerIconsAreTheirSpriteFrames()
 	{
 		String[] frames = {"MELEE", "RANGED", "MAGIC", "RETRIBUTION", "SMITE", "REDEMPTION", "RANGE_MAGE", "RANGE_MELEE",
