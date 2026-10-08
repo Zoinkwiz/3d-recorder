@@ -1,30 +1,19 @@
 package com.extrinsiccognition.embertide;
 
 import com.google.gson.JsonObject;
-import java.lang.invoke.MethodHandles;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import net.runelite.api.Client;
 import net.runelite.api.Constants;
 import net.runelite.api.DecorativeObject;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
-import net.runelite.api.IndexedObjectSet;
-import net.runelite.api.ObjectComposition;
-import net.runelite.api.Player;
-import net.runelite.api.Scene;
 import net.runelite.api.Tile;
 import net.runelite.api.TileItem;
 import net.runelite.api.WallObject;
-import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
 import org.junit.Test;
+import static com.extrinsiccognition.embertide.Fakes.fake;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -36,7 +25,7 @@ public class SceneLoadedTest
 	@Test
 	public void writesTheWholeSceneInTheFirstTick()
 	{
-		Rows rows = new Rows();
+		Fakes.Rows rows = new Fakes.Rows();
 		OsrsCapture capture = capture(rows, 12, 1);
 		capture.start();
 		assertTrue(capture.tick(true));
@@ -65,7 +54,7 @@ public class SceneLoadedTest
 	{
 		Map<String, Object> door = new HashMap<>(Map.of("getId", 5, "getConfig", 0));
 		Tile[][][] tiles = tiles(1);
-		Rows rows = new Rows();
+		Fakes.Rows rows = new Fakes.Rows();
 		OsrsCapture capture = capture(rows, 4, tiles);
 		tiles[2][60][70] = fake(Tile.class, Map.of("getWallObject", fake(WallObject.class, door)));
 		capture.start();
@@ -91,7 +80,7 @@ public class SceneLoadedTest
 	@Test
 	public void writesTransitionsAnywhereInTheSceneOnce()
 	{
-		Rows rows = new Rows();
+		Fakes.Rows rows = new Fakes.Rows();
 		OsrsCapture capture = capture(rows, 4, 1);
 		capture.start();
 		capture.tick(true);
@@ -115,7 +104,7 @@ public class SceneLoadedTest
 		Tile[][][] tiles = tiles(0);
 		TileItem bones = fake(TileItem.class, Map.of("getId", 526, "getQuantity", 1));
 		tiles[0][10][20] = fake(Tile.class, Map.of("getGroundItems", List.of(bones)));
-		Rows rows = new Rows();
+		Fakes.Rows rows = new Fakes.Rows();
 		OsrsCapture capture = capture(rows, 4, tiles);
 		capture.start();
 		capture.tick(true);
@@ -128,7 +117,7 @@ public class SceneLoadedTest
 	@Test
 	public void writesGameStateRows()
 	{
-		Rows rows = new Rows();
+		Fakes.Rows rows = new Fakes.Rows();
 		OsrsCapture capture = capture(rows, 4, 1);
 		capture.start();
 		capture.gameState("LOADING");
@@ -145,7 +134,7 @@ public class SceneLoadedTest
 		return row.has("payload") ? row.getAsJsonObject("payload") : row;
 	}
 
-	private static int count(Rows rows, String type, String field)
+	private static int count(Fakes.Rows rows, String type, String field)
 	{
 		return count(rows.list, type, field);
 	}
@@ -167,7 +156,7 @@ public class SceneLoadedTest
 		return n;
 	}
 
-	private static OsrsCapture capture(Rows rows, int radius, int objectsPerTile)
+	private static OsrsCapture capture(Fakes.Rows rows, int radius, int objectsPerTile)
 	{
 		return capture(rows, radius, tiles(objectsPerTile));
 	}
@@ -201,67 +190,6 @@ public class SceneLoadedTest
 
 	private static OsrsCapture capture(Recorder rows, int radius, Tile[][][] tiles)
 	{
-		IndexedObjectSet<?> empty = fake(IndexedObjectSet.class, Map.of("iterator", Collections.emptyIterator()));
-		Scene scene = fake(Scene.class, Map.of("getTiles", tiles,
-			"getOverlayIds", new short[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE],
-			"getUnderlayIds", new short[4][Constants.SCENE_SIZE][Constants.SCENE_SIZE]));
-		WorldView view = fake(WorldView.class, Map.of("getScene", scene, "getBaseX", BASE_X, "getBaseY", BASE_Y,
-			"getMapRegions", new int[]{12850}, "getTileHeights", new int[4][Constants.SCENE_SIZE + 1][Constants.SCENE_SIZE + 1],
-			"npcs", empty, "players", empty));
-		Player me = fake(Player.class, Map.of("getWorldLocation", new WorldPoint(3222, 3218, 0), "getName", "Tester"));
-		ObjectComposition plain = fake(ObjectComposition.class, Map.of());
-		Client client = fake(Client.class, Map.of("getTopLevelWorldView", view, "getLocalPlayer", me, "getTickCount", 42, "getObjectDefinition", plain));
-		EmbertideConfig config = fake(EmbertideConfig.class, Map.of("captureRadius", radius));
-		return new OsrsCapture(client, rows, config, "osrs:surface", "Tester", 301);
-	}
-
-	@SuppressWarnings("unchecked")
-	private static <T> T fake(Class<T> type, Map<String, Object> answers)
-	{
-		return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, (proxy, method, args) ->
-		{
-			if (answers.containsKey(method.getName())) { return answers.get(method.getName()); }
-			if (method.getName().equals("hashCode")) { return System.identityHashCode(proxy); }
-			if (method.getName().equals("equals")) { return proxy == args[0]; }
-			if (method.isDefault()) { return invokeDefault(type, proxy, method, args); }
-			Class<?> r = method.getReturnType();
-			if (r == boolean.class) { return false; }
-			if (r == int.class) { return 0; }
-			if (r == long.class) { return 0L; }
-			if (r == double.class) { return 0d; }
-			if (r == float.class) { return 0f; }
-			if (r == short.class) { return (short) 0; }
-			if (r == byte.class) { return (byte) 0; }
-			if (r == char.class) { return (char) 0; }
-			return null;
-		});
-	}
-
-	private static Object invokeDefault(Class<?> type, Object proxy, Method method, Object[] args) throws Throwable
-	{
-		return MethodHandles.privateLookupIn(type, MethodHandles.lookup()).unreflectSpecial(method, type)
-			.bindTo(proxy).invokeWithArguments(args == null ? new Object[0] : args);
-	}
-
-	private static final class Rows implements Recorder
-	{
-		final List<JsonObject> list = new ArrayList<>();
-		final com.google.gson.Gson gson = new com.google.gson.Gson();
-		long bytes;
-
-		@Override public State state() { return State.READY; }
-		@Override public String error() { return null; }
-		@Override public String captureId() { return "test"; }
-		@Override public CompletableFuture<Void> open(JsonObject header) { return CompletableFuture.completedFuture(null); }
-		@Override public boolean enqueue(JsonObject record, boolean control)
-		{
-			bytes += gson.toJson(record).length() + 1;
-			list.add(record);
-			return true;
-		}
-		@Override public CompletableFuture<Void> flush() { return CompletableFuture.completedFuture(null); }
-		@Override public CompletableFuture<Void> finish() { return CompletableFuture.completedFuture(null); }
-		@Override public CompletableFuture<Void> openStudio() { return CompletableFuture.completedFuture(null); }
-		@Override public String destination() { return ""; }
+		return Fakes.capture(rows, Fakes.view(BASE_X, BASE_Y, tiles, new int[4][Constants.SCENE_SIZE + 1][Constants.SCENE_SIZE + 1], null), radius);
 	}
 }

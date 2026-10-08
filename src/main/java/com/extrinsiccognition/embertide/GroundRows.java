@@ -1,7 +1,9 @@
 package com.extrinsiccognition.embertide;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import net.runelite.api.Constants;
@@ -16,18 +18,32 @@ import net.runelite.api.WorldView;
  * A tile is 0 (none), a paint [sw, se - sw, ne - sw, nw - sw] with a fifth texture when it has one, or a shaped tile
  * [-shape, rotation, then a, b - a, c - a, texture per face], colours as the client's HSL with 12345678 for hidden.
  * Corner colours of a tile share hue and saturation, so the differences are short.
+ * The writer and the viewer's reader of this layout both live here.
  */
-final class GroundRows
+public final class GroundRows
 {
 	/** Tile text per row, well below the app's 256 KiB row limit with the heights and envelope added. */
 	static final int MAX_TILE_CHARS = 96 * 1024;
-	static final int SIZE = Constants.SCENE_SIZE;
+	public static final int SIZE = Constants.SCENE_SIZE;
+	/** The client's colour for a face it does not draw. */
+	public static final int HIDDEN = 12345678;
+
+	/** Where a row read back goes, in world tiles on map planes. */
+	public interface Sink
+	{
+		/** A paint {0, sw, se, ne, nw, texture} or a shaped tile {shape, rotation, then a, b, c, texture per face}; null for none. */
+		void tile(int plane, int x, int y, int[] entry);
+
+		void corner(int plane, int x, int y, int height);
+
+		void bridge(int x, int y);
+	}
 
 	private GroundRows()
 	{
 	}
 
-	static List<JsonObject> of(WorldView view, String dimension)
+	public static List<JsonObject> of(WorldView view, String dimension)
 	{
 		List<JsonObject> rows = new ArrayList<>();
 		Scene scene = view.getScene();
@@ -169,5 +185,108 @@ final class GroundRows
 		}
 		row.addProperty("dimension", dimension);
 		return row;
+	}
+
+	/** Reads one row back, absolute values out, refusing anything the writer cannot produce. */
+	public static void read(JsonObject row, Sink sink) throws IOException
+	{
+		int baseX = number(row, "base_x"), baseY = number(row, "base_y"), plane = number(row, "plane"), x0 = number(row, "x");
+		JsonArray tiles = array(row, "tiles"), heights = array(row, "heights"), bridges = array(row, "bridges");
+		if (baseX < 0 || baseY < 0 || baseX > 20_000 || baseY > 20_000 || plane < 0 || plane > 3 || x0 < 0 || x0 + tiles.size() > SIZE
+			|| heights.size() > tiles.size() + 1 || bridges.size() % 2 != 0 || bridges.size() > 2 * SIZE * SIZE)
+		{
+			throw new IOException("Invalid ground row");
+		}
+		for (int c = 0; c < tiles.size(); c++)
+		{
+			JsonArray column = tiles.get(c).getAsJsonArray();
+			if (column.size() != SIZE) { throw new IOException("Invalid ground column"); }
+			for (int y = 0; y < SIZE; y++)
+			{
+				JsonElement e = column.get(y);
+				if (!e.isJsonArray() && e.getAsInt() != 0) { throw new IOException("Invalid ground tile"); }
+				sink.tile(plane, baseX + x0 + c, baseY + y, e.isJsonArray() ? entry(e.getAsJsonArray()) : null);
+			}
+		}
+		for (int c = 0; c < heights.size(); c++)
+		{
+			JsonArray column = heights.get(c).getAsJsonArray();
+			if (column.size() > SIZE + 1) { throw new IOException("Invalid ground heights"); }
+			int height = 0;
+			for (int y = 0; y < column.size(); y++)
+			{
+				height += value(column, y, 1 << 20);
+				if (Math.abs(height) > 1 << 20) { throw new IOException("Invalid ground height"); }
+				sink.corner(plane, baseX + x0 + c, baseY + y, height);
+			}
+		}
+		for (int i = 0; i < bridges.size(); i += 2)
+		{
+			int x = value(bridges, i, SIZE), y = value(bridges, i + 1, SIZE);
+			if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) { throw new IOException("Invalid bridge tile"); }
+			sink.bridge(baseX + x, baseY + y);
+		}
+	}
+
+	private static int[] entry(JsonArray a) throws IOException
+	{
+		if (a.size() == 0) { throw new IOException("Invalid ground tile"); }
+		if (a.get(0).getAsDouble() >= 0)
+		{
+			if (a.size() != 4 && a.size() != 5) { throw new IOException("Invalid ground paint"); }
+			int sw = colour(a, 0);
+			return new int[]{0, sw, sw + colour(a, 1), sw + colour(a, 2), sw + colour(a, 3), a.size() == 5 ? texture(a, 4) : -1};
+		}
+		int shape = -value(a, 0, 16), faces = (a.size() - 2) / 4, rotation = value(a, 1, 16);
+		if (shape < 2 || shape > 12 || rotation < 0 || rotation > 3 || (a.size() - 2) % 4 != 0 || faces < 1 || faces > 6)
+		{
+			throw new IOException("Invalid shaped ground tile");
+		}
+		int[] entry = new int[a.size()];
+		entry[0] = shape;
+		entry[1] = rotation;
+		for (int at = 2; at < a.size(); at += 4)
+		{
+			entry[at] = colour(a, at);
+			entry[at + 1] = entry[at] + colour(a, at + 1);
+			entry[at + 2] = entry[at] + colour(a, at + 2);
+			entry[at + 3] = texture(a, at + 3);
+		}
+		return entry;
+	}
+
+	private static int colour(JsonArray a, int i) throws IOException
+	{
+		return value(a, i, 16_777_215);
+	}
+
+	private static int texture(JsonArray a, int i) throws IOException
+	{
+		int v = value(a, i, 65535);
+		if (v < -1) { throw new IOException("Invalid ground texture"); }
+		return v;
+	}
+
+	/** A whole number within plus or minus limit. */
+	private static int value(JsonElement e, int limit) throws IOException
+	{
+		double v = e == null || e.isJsonNull() ? 0 : e.getAsDouble();
+		if (v != Math.rint(v) || Math.abs(v) > limit) { throw new IOException("Invalid ground value"); }
+		return (int) v;
+	}
+
+	private static int value(JsonArray a, int i, int limit) throws IOException
+	{
+		return value(a.get(i), limit);
+	}
+
+	private static int number(JsonObject o, String key) throws IOException
+	{
+		return value(o.get(key), 1 << 20);
+	}
+
+	private static JsonArray array(JsonObject o, String key)
+	{
+		return o.has(key) && o.get(key).isJsonArray() ? o.getAsJsonArray(key) : new JsonArray();
 	}
 }
