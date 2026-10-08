@@ -121,6 +121,19 @@ public class RaidHudTest
 	}
 
 	@Test
+	public void prayerIconsAreTheirSpriteFrames()
+	{
+		String[] frames = {"MELEE", "RANGED", "MAGIC", "RETRIBUTION", "SMITE", "REDEMPTION", "RANGE_MAGE", "RANGE_MELEE",
+			"MAGE_MELEE", "RANGE_MAGE_MELEE", "WRATH", "SOUL_SPLIT", "DEFLECT_MELEE", "DEFLECT_RANGE", "DEFLECT_MAGE"};
+		for (int frame = 0; frame < frames.length; frame++)
+		{
+			assertEquals(frames[frame], frame, OsrsCapture.prayerFrame(HeadIcon.valueOf(frames[frame])));
+		}
+		assertEquals(frames.length, HeadIcon.values().length);
+		assertEquals(-1, OsrsCapture.prayerFrame(null));
+	}
+
+	@Test
 	public void aScriptedRaidChangesOnlyTheNewRows() throws Exception
 	{
 		List<String> plain = raid(tick -> { }, new RaidScene(30, 11));

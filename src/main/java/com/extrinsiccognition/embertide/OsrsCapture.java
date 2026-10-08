@@ -1741,8 +1741,7 @@ public final class OsrsCapture
 		short[] sprites = null;
 		if (actor instanceof Player)
 		{
-			HeadIcon icon = ((Player) actor).getOverheadIcon();
-			prayer = icon == null ? -1 : icon.ordinal();
+			prayer = prayerFrame(((Player) actor).getOverheadIcon());
 			skull = Math.max(-1, ((Player) actor).getSkullIcon());
 		}
 		else if (actor instanceof NPC)
@@ -1788,6 +1787,31 @@ public final class OsrsCapture
 			if (last[at++] != archives[i] || last[at++] != sprites[i]) { return false; }
 		}
 		return true;
+	}
+
+	/** The frame of sprite 440 the client draws for icon, -1 for none; by name, so a reordered enum cannot shift it. */
+	static int prayerFrame(HeadIcon icon)
+	{
+		if (icon == null) { return -1; }
+		switch (icon)
+		{
+			case MELEE: return 0;
+			case RANGED: return 1;
+			case MAGIC: return 2;
+			case RETRIBUTION: return 3;
+			case SMITE: return 4;
+			case REDEMPTION: return 5;
+			case RANGE_MAGE: return 6;
+			case RANGE_MELEE: return 7;
+			case MAGE_MELEE: return 8;
+			case RANGE_MAGE_MELEE: return 9;
+			case WRATH: return 10;
+			case SOUL_SPLIT: return 11;
+			case DEFLECT_MELEE: return 12;
+			case DEFLECT_RANGE: return 13;
+			case DEFLECT_MAGE: return 14;
+			default: return -1;
+		}
 	}
 
 	/** The client's HP bar at the top of the screen, on change once one has been seen. */
