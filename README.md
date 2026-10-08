@@ -3,7 +3,8 @@
 Records your session as a 3D replay. Afterwards you can fly a camera round
 it from any angle, change the look, and cut clips of your play, either in
 your browser at [embertide.gg/studio](https://embertide.gg/studio/) or in
-the Embertide app. No account needed for the browser version.
+the Embertide app. No account needed for the browser version. You can also
+watch a recording inside the game, in your player-owned house.
 
 View your recordings:
 
@@ -33,6 +34,30 @@ Change your angle of the same scene:
 
 Long sessions are saved as a few files. Studio and the app show them as one
 recording.
+
+## Watch it in your house
+
+The side panel's **Watch in your house** section plays a saved recording back
+in your player-owned house, as a small diorama (**Miniature**) or around you
+at full size (**Life size**).
+
+1. Press **Watch a recording…** and pick one, or press **Watch in your house**
+   under a part saved this session.
+2. Go into your house, ideally an open garden or an empty room.
+3. Press **Place here**, or right-click a floor tile and choose **Place
+   Embertide replay**. Then play, pause, scrub, change the speed or rotate it.
+
+Only you can see it. The recorded figures and scenery are pictures: they
+can't be clicked, don't block anyone, and your house still decides where you
+can walk. **Hide surroundings** (on by default) hides the house, other
+players and pets while the replay is placed, and puts them back when you
+press **Clear**, leave the house or log out. It works with RuneLite's GPU
+plugin and 117 HD; with other renderers the panel says so, and you can untick
+it to watch with the house showing.
+
+Recordings made with this version save the ground as you saw it. Older ones
+show the floor only near where you walked, or no floor at all, and the panel
+says which.
 
 ## What is recorded
 
@@ -64,8 +89,9 @@ milestones in the plugin's settings.
 
 The plugin doesn't connect to anything. It writes your recording to a
 `.partial` file in its folder as you play, and renames the file when each
-part is saved. Your recordings stay on your computer unless you choose to
-share them.
+part is saved. To watch, it reads only the recordings in that same folder,
+and the game's own models, which the client already has. It reads no other
+files. Your recordings stay on your computer unless you choose to share them.
 
 Studio runs in your browser and keeps the recording on your computer unless
 you make a share link. You don't need an account.
@@ -82,3 +108,11 @@ recordings** in the side panel shows the full path.
 
 Each file is gzipped JSON Lines. If saving a part fails, the side panel
 offers to retry.
+
+## Development
+
+With JDK 11, `./gradlew test jar`, then `./gradlew run` (or double-click
+`run-dev.command` on a Mac) starts a RuneLite development client with the
+plugin. `./gradlew inspectRecording -Precording=<file or folder>` checks that
+saved recordings open, and `scripts/size-budget.sh` counts the repository's
+text against its 200k-token budget.

@@ -1,5 +1,6 @@
 package com.extrinsiccognition.embertide;
 
+import com.extrinsiccognition.embertide.viewer.Viewer;
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import java.awt.Color;
@@ -43,6 +44,7 @@ import net.runelite.api.events.WallObjectDespawned;
 import net.runelite.api.events.WallObjectSpawned;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.NpcLootReceived;
@@ -61,8 +63,8 @@ import net.runelite.http.api.loottracker.LootRecordType;
 	name = "3D Replay Recorder",
 	internalName = "3d-recorder",
 	legacyDataDirectory = "embertide",
-	description = "Records your session as a 3D replay you can fly a camera through and cut into clips at embertide.gg. Nothing leaves your machine; other players appear as unnamed figures.",
-	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide"}
+	description = "Records your session as a 3D replay you can fly a camera through and cut into clips at embertide.gg, or watch in your POH. Nothing leaves your machine; other players appear as unnamed figures.",
+	tags = {"3d", "replay", "recorder", "recording", "clips", "video", "camera", "embertide", "viewer", "poh"}
 )
 public class EmbertidePlugin extends Plugin
 {
@@ -104,6 +106,10 @@ public class EmbertidePlugin extends Plugin
 	private ClientThread clientThread;
 	@Inject
 	private ClientToolbar clientToolbar;
+	@Inject
+	private EventBus eventBus;
+	@Inject
+	private Viewer viewer;
 	@Inject
 	private EmbertideConfig config;
 	@Inject
@@ -149,6 +155,8 @@ public class EmbertidePlugin extends Plugin
 	{
 		enabled = true;
 		loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		viewer.startUp();
+		eventBus.register(viewer);
 		prepareFolder();
 		int generation = ++uiGeneration;
 		javax.swing.SwingUtilities.invokeLater(() ->
@@ -183,6 +191,13 @@ public class EmbertidePlugin extends Plugin
 			if (closingPanel != null) { closingPanel.dispose(); }
 		});
 		clientThread.invoke(() -> endCapture("plugin stopped", false, true));
+		eventBus.unregister(viewer);
+		viewer.shutDown();
+	}
+
+	Viewer viewer()
+	{
+		return viewer;
 	}
 
 	@Subscribe
@@ -531,6 +546,7 @@ public class EmbertidePlugin extends Plugin
 			try
 			{
 				folder = getPluginDirectory();
+				viewer.folder(folder);
 				notice = "Ready to record.";
 			}
 			catch (java.io.IOException | RuntimeException e)

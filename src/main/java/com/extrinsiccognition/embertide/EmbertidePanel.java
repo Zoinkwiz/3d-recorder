@@ -12,6 +12,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
@@ -31,10 +32,10 @@ public final class EmbertidePanel extends PluginPanel
 	private final Timer refresh;
 	private boolean recording;
 	private String drawn = "";
+	private final EmbertidePlugin plugin;
 
 	EmbertidePanel(EmbertidePlugin plugin)
 	{
-		super(false);
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -125,8 +126,18 @@ public final class EmbertidePanel extends PluginPanel
 		actions.add(retry);
 		actions.add(discard);
 		actions.add(folder);
-		add(actions, BorderLayout.SOUTH);
+		JPanel bottom = new JPanel();
+		bottom.setLayout(new BoxLayout(bottom, BoxLayout.Y_AXIS));
+		bottom.setOpaque(false);
+		actions.setAlignmentX(LEFT_ALIGNMENT);
+		bottom.add(actions);
+		bottom.add(Box.createVerticalStrut(16));
+		JComponent watch = plugin.viewer().panel();
+		watch.setAlignmentX(LEFT_ALIGNMENT);
+		bottom.add(watch);
+		add(bottom, BorderLayout.SOUTH);
 
+		this.plugin = plugin;
 		refresh = new Timer(500, e -> render(plugin));
 		refresh.setInitialDelay(0);
 		render(plugin);
@@ -171,7 +182,7 @@ public final class EmbertidePanel extends PluginPanel
 		files.add(Box.createVerticalStrut(4));
 		if (!current.isEmpty())
 		{
-			files.add(row(current, "recording now", false));
+			files.add(row(current, "recording now", false, null));
 		}
 		for (int i = saved.size() - 1; i >= 0; i--)
 		{
@@ -180,13 +191,13 @@ public final class EmbertidePanel extends PluginPanel
 			String note = file.problem.isEmpty()
 				? String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
 				: "not saved: " + file.problem;
-			files.add(row(file.name, note, !file.problem.isEmpty()));
+			files.add(row(file.name, note, !file.problem.isEmpty(), file.problem.isEmpty() ? () -> plugin.viewer().load(file.name) : null));
 		}
 		files.revalidate();
 		files.repaint();
 	}
 
-	private static JPanel row(String name, String note, boolean problem)
+	private static JPanel row(String name, String note, boolean problem, Runnable watch)
 	{
 		JPanel row = new JPanel();
 		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
@@ -201,6 +212,21 @@ public final class EmbertidePanel extends PluginPanel
 		detail.setForeground(problem ? ColorScheme.PROGRESS_ERROR_COLOR : ColorScheme.MEDIUM_GRAY_COLOR);
 		row.add(file);
 		row.add(detail);
+		if (watch != null)
+		{
+			JLabel link = new JLabel("<html><u>Watch in your house</u></html>");
+			link.setForeground(ColorScheme.BRAND_ORANGE);
+			link.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			link.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					watch.run();
+				}
+			});
+			row.add(link);
+		}
 		return row;
 	}
 
