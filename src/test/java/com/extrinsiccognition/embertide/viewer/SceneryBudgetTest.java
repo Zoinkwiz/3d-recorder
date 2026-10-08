@@ -4,33 +4,26 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.runelite.api.Client;
-import net.runelite.api.Model;
-import net.runelite.api.ModelData;
 import net.runelite.api.RuneLiteObjectController;
 import net.runelite.api.coords.LocalPoint;
 import org.junit.Test;
+import static com.extrinsiccognition.embertide.viewer.RecordingReaderTest.*;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 public class SceneryBudgetTest
 {
-	private final Client client = mock(Client.class, RETURNS_DEEP_STUBS);
+	private final Client client = ProjectionTest.client();
 	private final Set<RuneLiteObjectController> registered = new HashSet<>();
 
 	private Recording recording() throws Exception
 	{
-		when(client.getIndexConfig().loadData(6, 42)).thenReturn(new byte[]{5, 1, 0, 1, 0});
 		when(client.getIndexConfig().loadData(6, 43)).thenReturn(new byte[]{0});
-		ModelData data = mock(ModelData.class); Model model = mock(Model.class);
-		when(model.getVerticesCount()).thenReturn(3); when(model.getFaceCount()).thenReturn(1);
-		when(client.loadModelData(1)).thenReturn(data);
-		when(client.mergeModels(any(ModelData[].class))).thenReturn(data);
-		when(data.light(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(model);
 		when(client.isRuneLiteObjectRegistered(any())).thenAnswer(call -> registered.contains(call.getArgument(0)));
 		doAnswer(call -> { assertTrue(registered.add(call.getArgument(0))); return null; }).when(client).registerRuneLiteObject(any());
 		doAnswer(call -> { assertTrue(registered.remove(call.getArgument(0))); return null; }).when(client).removeRuneLiteObject(any());
-		Recording recording = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0));
+		Recording recording = parse(HEADER + pose(0, 3200, 0));
 		recording.sceneAt(0).actors.clear(); return recording;
 	}
 

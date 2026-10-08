@@ -4,6 +4,7 @@ import com.extrinsiccognition.embertide.GroundRows;
 import java.io.IOException;
 import org.junit.Test;
 import static com.extrinsiccognition.embertide.viewer.GroundFixture.*;
+import static com.extrinsiccognition.embertide.viewer.RecordingReaderTest.*;
 import static org.junit.Assert.*;
 
 public class TerrainTest
@@ -13,7 +14,7 @@ public class TerrainTest
 	/** Plane p corner height (positive down, as the client holds it) is -(10 + x) * (p + 1). */
 	private static Recording recording(PlaneTiles tiles, int... bridges) throws IOException
 	{
-		return RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
+		return parse(HEADER + pose(0, 3200, 0)
 			+ scene(0, BASE_X, BASE_Y, tiles, (p, x, y) -> -(10 + x) * (p + 1), bridges));
 	}
 
@@ -58,7 +59,7 @@ public class TerrainTest
 
 	@Test public void aLaterSceneLoadReplacesTheTilesItCoversAndKeepsTheRest() throws Exception
 	{
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
+		Recording r = parse(HEADER + pose(0, 3200, 0)
 			+ scene(0, BASE_X, BASE_Y, (p, x, y) -> p == 0 ? paint(1, 1, 1, 1) : null, (p, x, y) -> 0)
 			+ scene(1, BASE_X + 64, BASE_Y, (p, x, y) -> p == 0 && x > 0 ? paint(2, 2, 2, 2) : null, (p, x, y) -> -8));
 		Terrain t = r.scenes.get(0).terrain;
@@ -73,11 +74,11 @@ public class TerrainTest
 	{
 		Recording.Scene scene = recording((p, x, y) -> p == 0 ? paint(1, 1, 1, 1) : null).scenes.get(0);
 		assertEquals(66.75, scene.height(BASE_X + 56.75, BASE_Y + 3.25, 0), 1e-9);
-		Recording old = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.scene", "{\"dimension\":\"osrs:instance:1\",\"reset\":true}")
-			+ RecordingReaderTest.event(0, "osrs.region", "{\"instance\":true,\"base_x\":1000,\"base_y\":2000,\"regions\":[]}")
-			+ RecordingReaderTest.event(0, "osrs.instance_heights", "{\"base_x\":1000,\"base_y\":2000,\"plane\":0,\"heights\":" + grid(-500) + "}")
-			+ RecordingReaderTest.pose(0, 1002, 0));
+		Recording old = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.scene", "{\"dimension\":\"osrs:instance:1\",\"reset\":true}")
+			+ event(0, "osrs.region", "{\"instance\":true,\"base_x\":1000,\"base_y\":2000,\"regions\":[]}")
+			+ event(0, "osrs.instance_heights", "{\"base_x\":1000,\"base_y\":2000,\"plane\":0,\"heights\":" + grid(-500) + "}")
+			+ pose(0, 1002, 0));
 		Recording.Scene instance = old.scenes.get(1);
 		assertFalse(instance.terrain.recorded()); assertNull(instance.terrain.tile(1002, 2003, 0));
 		assertEquals(500, instance.height(1002.5, 2003.5, 0), 0);
@@ -95,15 +96,15 @@ public class TerrainTest
 		};
 		for (String row : bad)
 		{
-			try { RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0) + RecordingReaderTest.event(0, "osrs.ground", row)); fail(row); }
+			try { parse(HEADER + pose(0, 3200, 0) + event(0, "osrs.ground", row)); fail(row); }
 			catch (IOException expected) { assertTrue(expected.getMessage(), expected.getMessage().contains("Invalid")); }
 		}
 	}
 
 	@Test public void aRecordingWithoutGroundRowsHasNoGround() throws Exception
 	{
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,0,-3200,\"osrs:underlay:10\"]]}"));
+		Recording r = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,0,-3200,\"osrs:underlay:10\"]]}"));
 		assertFalse(r.scenes.get(0).terrain.recorded());
 		assertNull(r.scenes.get(0).terrain.tile(3200, 3200, 0));
 	}

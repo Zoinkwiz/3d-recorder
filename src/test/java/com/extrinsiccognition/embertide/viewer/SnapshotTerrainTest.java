@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.IntFunction;
 import org.junit.Test;
+import static com.extrinsiccognition.embertide.viewer.RecordingReaderTest.*;
 import static org.junit.Assert.*;
 
 /** A recording made before osrs.ground rows gets a floor from its snapshot cells and the client's floor definitions. */
@@ -27,8 +28,8 @@ public class SnapshotTerrainTest
 
 	private static Recording snapshot(String... cells) throws Exception
 	{
-		return RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[" + String.join(",", cells) + "]}"));
+		return parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[" + String.join(",", cells) + "]}"));
 	}
 
 	@Test public void cellsBecomeAFloorWithOverlaysOverTheBlendedUnderlay() throws Exception
@@ -78,12 +79,12 @@ public class SnapshotTerrainTest
 
 	@Test public void savedInstanceHeightsBeatTheRoundedCellHeight() throws Exception
 	{
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.scene", "{\"dimension\":\"osrs:instance:1\"}")
-			+ RecordingReaderTest.event(0, "osrs.region", "{\"instance\":true,\"base_x\":1000,\"base_y\":2000,\"regions\":[]}")
-			+ RecordingReaderTest.event(0, "osrs.instance_heights", "{\"base_x\":1000,\"base_y\":2000,\"plane\":0,\"heights\":" + TerrainTest.grid(-300) + "}")
-			+ RecordingReaderTest.pose(0, 1002, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[[1002,2,-2003,\"osrs:underlay:11\"]]}"));
+		Recording r = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.scene", "{\"dimension\":\"osrs:instance:1\"}")
+			+ event(0, "osrs.region", "{\"instance\":true,\"base_x\":1000,\"base_y\":2000,\"regions\":[]}")
+			+ event(0, "osrs.instance_heights", "{\"base_x\":1000,\"base_y\":2000,\"plane\":0,\"heights\":" + TerrainTest.grid(-300) + "}")
+			+ pose(0, 1002, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[[1002,2,-2003,\"osrs:underlay:11\"]]}"));
 		Recording.Scene instance = r.scenes.get(1);
 		assertEquals(1, SnapshotTerrain.build(instance, under(), over()));
 		assertArrayEquals(new double[]{300, 300, 300, 300}, instance.terrain.tile(1002, 2003, 0).heights, 0);
@@ -91,9 +92,9 @@ public class SnapshotTerrainTest
 
 	@Test public void groundRowsWinOverSnapshotCells() throws Exception
 	{
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
+		Recording r = parse(HEADER + pose(0, 3200, 0)
 			+ GroundFixture.scene(0, 3176, 3168, (p, x, y) -> p == 0 ? GroundFixture.paint(50, 51, 52, 53) : null, (p, x, y) -> 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[" + cell(3200, 2, "osrs:underlay:11") + "]}"));
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[" + cell(3200, 2, "osrs:underlay:11") + "]}"));
 		Recording.Scene scene = r.scenes.get(0);
 		assertEquals(0, SnapshotTerrain.build(scene, under(), over()));
 		assertFalse(scene.terrain.sampled);

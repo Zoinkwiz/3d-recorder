@@ -4,34 +4,22 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import net.runelite.api.Client;
-import net.runelite.api.Model;
-import net.runelite.api.ModelData;
 import net.runelite.api.RuneLiteObjectController;
 import net.runelite.api.coords.LocalPoint;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import static com.extrinsiccognition.embertide.viewer.RecordingReaderTest.*;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 public class MultiFloorProjectionTest
 {
-	private Client client()
-	{
-		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
-		when(client.getIndexConfig().loadData(6,42)).thenReturn(new byte[]{5,1,0,1,0});
-		when(client.getIndexConfig().loadData(9,42)).thenReturn(new byte[]{1,1,0,1,0});
-		ModelData data = mock(ModelData.class); Model model = mock(Model.class);
-		when(model.getVerticesCount()).thenReturn(3); when(model.getFaceCount()).thenReturn(1);
-		when(client.loadModelData(1)).thenReturn(data);
-		when(client.mergeModels(any(ModelData[].class))).thenReturn(data);
-		when(data.light(anyInt(),anyInt(),anyInt(),anyInt(),anyInt())).thenReturn(model);
-		return client;
-	}
+	private static Client client() { return ProjectionTest.client(); }
 	private Recording recording() throws Exception
 	{
 		// Every floor painted; map plane p sits 240 * (p + 1) units up.
-		return RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0,3210,1)
+		return parse(HEADER + pose(0,3210,1)
 			+ GroundFixture.scene(0, 3176, 3168, (p, x, y) -> GroundFixture.paint(1, 1, 1, 1), (p, x, y) -> -240 * (p + 1)));
 	}
 	private void place(ReplayRenderer renderer, Recording.Scene scene, boolean allFloors, boolean miniature, boolean map)

@@ -4,6 +4,7 @@ import java.util.List;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
+import net.runelite.api.ModelData;
 import net.runelite.api.RuneLiteObjectController;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
@@ -11,12 +12,26 @@ import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.gameval.ObjectID;
 import org.junit.Test;
+import static com.extrinsiccognition.embertide.viewer.RecordingReaderTest.*;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 public class ProjectionTest
 {
+	/** A client whose object 42 and NPC 42 are one three-vertex model 1, through the real decoders and model cache. */
+	static Client client()
+	{
+		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
+		when(client.getIndexConfig().loadData(6, 42)).thenReturn(new byte[]{5, 1, 0, 1, 0});
+		when(client.getIndexConfig().loadData(9, 42)).thenReturn(new byte[]{1, 1, 0, 1, 0});
+		ModelData data = mock(ModelData.class); Model model = mock(Model.class);
+		when(model.getVerticesCount()).thenReturn(3); when(model.getFaceCount()).thenReturn(1);
+		when(client.loadModelData(1)).thenReturn(data);
+		when(client.mergeModels(any(ModelData[].class))).thenReturn(data);
+		when(data.light(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(model);
+		return client;
+	}
 	@Test public void projectsOnlyInsideAnInstanceWithTheHouseExitPortal()
 	{
 		WorldView view = mock(WorldView.class); Scene scene = mock(Scene.class); Tile tile = mock(Tile.class); GameObject portal = mock(GameObject.class);
@@ -55,9 +70,9 @@ public class ProjectionTest
 	{
 		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
 		when(client.getIndexConfig().loadData(9, 42)).thenReturn(new byte[]{1, 1, 0, 1, 0});
-		net.runelite.api.ModelData data = mock(net.runelite.api.ModelData.class); Model empty = mock(Model.class);
+		ModelData data = mock(ModelData.class); Model empty = mock(Model.class);
 		when(client.loadModelData(1)).thenReturn(data);
-		when(client.mergeModels(any(net.runelite.api.ModelData[].class))).thenReturn(data);
+		when(client.mergeModels(any(ModelData[].class))).thenReturn(data);
 		when(data.light(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(empty);
 		CacheModels models = new CacheModels(client); models.beginTick();
 		assertNull(models.actor(null, 42, -1, -1)); models.beginTick();
@@ -79,7 +94,7 @@ public class ProjectionTest
 	@Test public void unknownModelsNeverRegisterEmptySceneObjects() throws Exception
 	{
 		Client client = mock(Client.class); ReplayRenderer renderer = new ReplayRenderer(client);
-		Recording recording = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0));
+		Recording recording = parse(HEADER + pose(0, 3200, 0));
 		Recording.Scene scene = recording.sceneAt(0);
 		renderer.place(scene, scene.origin(0), new LocalPoint(6400, 6400, -1), 0, 0, false, 4, 12, 0, 0, false, 0, false);
 		renderer.draw(recording, 0, false, false);
@@ -99,8 +114,8 @@ public class ProjectionTest
 	@Test public void aRecordingWithoutGroundSaysSoAndDrawsNoGround() throws Exception
 	{
 		Client client = mock(Client.class); ReplayRenderer renderer = new ReplayRenderer(client);
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,0,-3200,\"osrs:underlay:10\"]]}"));
+		Recording r = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,0,-3200,\"osrs:underlay:10\"]]}"));
 		renderer.place(r.sceneAt(0), r.sceneAt(0).origin(0), new LocalPoint(6400, 6400, -1), 0, 0, true, 4, 12, 0, 0, false, 0, false);
 		renderer.draw(r, 0, true, false);
 		assertTrue(renderer.status(), renderer.status().contains(ReplayRenderer.NO_GROUND));
@@ -111,8 +126,8 @@ public class ProjectionTest
 		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
 		when(client.getIndexConfig().loadData(Definitions.UNDERLAY, 9)).thenReturn(new byte[]{1, 0x40, (byte) 0x80, 0x20, 0});
 		ReplayRenderer renderer = new ReplayRenderer(client);
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,1,-3200,\"osrs:underlay:10\"],[3201,1,-3200,\"osrs:underlay:0\"]]}"));
+		Recording r = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,1,-3200,\"osrs:underlay:10\"],[3201,1,-3200,\"osrs:underlay:0\"]]}"));
 		Recording.Scene scene = r.sceneAt(0);
 		renderer.place(scene, scene.origin(0), new LocalPoint(6400, 6400, -1), 0, 0, true, 4, 12, 0, 0, false, 0, false);
 		assertNotNull(scene.terrain.tile(3200, 3200, 0)); assertNull(scene.terrain.tile(3201, 3200, 0));
@@ -123,24 +138,16 @@ public class ProjectionTest
 		verify(client, atLeastOnce()).loadModelData(3728);
 
 		Client empty = mock(Client.class, RETURNS_DEEP_STUBS); ReplayRenderer none = new ReplayRenderer(empty);
-		Recording blank = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0)
-			+ RecordingReaderTest.event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,1,-3200,\"osrs:underlay:0\"]]}"));
+		Recording blank = parse(HEADER + pose(0, 3200, 0)
+			+ event(0, "mccr.spatial_snapshot", "{\"cells\":[[3200,1,-3200,\"osrs:underlay:0\"]]}"));
 		none.place(blank.sceneAt(0), blank.sceneAt(0).origin(0), new LocalPoint(6400, 6400, -1), 0, 0, true, 4, 12, 0, 0, false, 0, false);
 		assertTrue(none.status(), none.status().contains(ReplayRenderer.NO_GROUND));
 	}
 	@Test public void everyRegisteredObjectIsRemovedOnClear() throws Exception
 	{
-		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
-		// A synthetic NPC exercises the real decoder and cache assembly seam.
-		when(client.getIndexConfig().loadData(9, 42)).thenReturn(new byte[]{1, 1, 0, 1, 0});
-		net.runelite.api.ModelData data = mock(net.runelite.api.ModelData.class);
-		Model model = mock(Model.class);
-		when(model.getVerticesCount()).thenReturn(3); when(model.getFaceCount()).thenReturn(1);
-		when(client.loadModelData(1)).thenReturn(data);
-		when(client.mergeModels(any(net.runelite.api.ModelData[].class))).thenReturn(data);
-		when(data.light(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(model);
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER
-			+ RecordingReaderTest.event(0, "osrs.poses", "{\"poses\":[[\"npc:1\",3200,3200,0,0,0,-1,-1,0,-1,42]]}"));
+		Client client = client();
+		Recording r = parse(HEADER
+			+ event(0, "osrs.poses", "{\"poses\":[[\"npc:1\",3200,3200,0,0,0,-1,-1,0,-1,42]]}"));
 		ReplayRenderer renderer = new ReplayRenderer(client);
 		renderer.place(r.sceneAt(0), r.sceneAt(0).origin(0), new LocalPoint(6400, 6400, -1), 0, 0, true, 4, 12, 0, 0, false, 0, false);
 		renderer.draw(r, 0, false, false);
@@ -151,15 +158,8 @@ public class ProjectionTest
 
 	@Test public void recordedObjectsRespectDespawnSeeksAndLayerCleanup() throws Exception
 	{
-		Client client = mock(Client.class, RETURNS_DEEP_STUBS);
-		when(client.getIndexConfig().loadData(6, 42)).thenReturn(new byte[]{5, 1, 0, 1, 0});
-		net.runelite.api.ModelData data = mock(net.runelite.api.ModelData.class);
-		Model model = mock(Model.class);
-		when(model.getVerticesCount()).thenReturn(3); when(model.getFaceCount()).thenReturn(1);
-		when(client.loadModelData(1)).thenReturn(data);
-		when(client.mergeModels(any(net.runelite.api.ModelData[].class))).thenReturn(data);
-		when(data.light(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(model);
-		Recording r = RecordingReaderTest.parse(RecordingReaderTest.HEADER + RecordingReaderTest.pose(0, 3200, 0));
+		Client client = client();
+		Recording r = parse(HEADER + pose(0, 3200, 0));
 		Recording.Scene scene = r.sceneAt(0);
 		Recording.Scenery present = new Recording.Scenery(0, 3201, 3201, 0, 42, 10, 0, 0, true);
 		Recording.Scenery removal = new Recording.Scenery(1, 3201, 3201, 0, 42, 10, 0, 0, false);
