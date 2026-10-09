@@ -35,12 +35,13 @@ final class WatchPanel extends JPanel
 		JComboBox<String> mode = new JComboBox<>(new String[]{"Miniature", "Life size"});
 		JComboBox<String> speed = new JComboBox<>(new String[]{"0.25×", "0.5×", "1×", "2×", "4×"}); speed.setSelectedIndex(2);
 		JCheckBox loop = new JCheckBox("Loop", true), isolate = new JCheckBox("Hide surroundings", true);
+		isolate.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 0, 2, 0));
 		isolate.setToolTipText("Hides the house, other players and pets while the replay is placed. House walls still block you. Clear puts them back.");
-		status.setRows(4);
 		JTextArea hint = text("More options in the plugin's settings."); hint.setForeground(new Color(170, 170, 170));
 		for (JComponent c : new JComponent[]{load, file, mode, pair(place, clear), rotate, seek, time, pair(play, restart), pair(speed, loop), isolate, status, hint})
 		{
-			c.setAlignmentX(LEFT_ALIGNMENT); c.setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(26, c.getPreferredSize().height)));
+			c.setAlignmentX(LEFT_ALIGNMENT);
+			if (!(c instanceof JTextArea)) { c.setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(26, c.getPreferredSize().height))); }
 			add(c); add(Box.createVerticalStrut(8));
 		}
 		load.addActionListener(e -> viewer.choose(this));
@@ -78,11 +79,17 @@ final class WatchPanel extends JPanel
 	{ JPanel row = new JPanel(new GridLayout(1, 2, 6, 0)); row.setOpaque(false); row.add(left); row.add(right); return row; }
 	private static JTextArea text(String content)
 	{
-		JTextArea area = new JTextArea(content); area.setLineWrap(true); area.setWrapStyleWord(true); area.setEditable(false);
+		// Text grows with its content; a fixed row count left an empty band under the controls.
+		JTextArea area = new JTextArea(content)
+		{
+			@Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+		};
+		area.setLineWrap(true); area.setWrapStyleWord(true); area.setEditable(false);
 		// A read-only JTextArea still has a caret. Its default policy scrolls the
 		// surrounding sidebar on setText(), even when the user scrolled elsewhere.
 		((DefaultCaret) area.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
 		area.setFocusable(false);
-		area.setOpaque(false); area.setFont(new JLabel().getFont()); area.setColumns(20); area.setRows(2); return area;
+		area.setOpaque(false); area.setFont(new JLabel().getFont()); area.setColumns(20);
+		area.setBorder(javax.swing.BorderFactory.createEmptyBorder()); return area;
 	}
 }

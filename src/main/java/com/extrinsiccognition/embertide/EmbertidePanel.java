@@ -33,6 +33,9 @@ public final class EmbertidePanel extends PluginPanel
 	private final JButton discard = new JButton("Discard unsaved recording");
 	private final Timer refresh;
 	private final MaterialTab watchTab;
+	// GridLayout keeps room for hidden buttons, so Retry and Discard are added only while they apply.
+	private final JPanel actions = new JPanel(new GridLayout(0, 1, 0, 6));
+	private Boolean recoverShown;
 	private boolean recording;
 	private String drawn = "";
 	private final EmbertidePlugin plugin;
@@ -78,7 +81,6 @@ public final class EmbertidePanel extends PluginPanel
 		middle.add(Box.createVerticalGlue());
 		record.add(middle, BorderLayout.CENTER);
 
-		JPanel actions = new JPanel(new GridLayout(0, 1, 0, 6));
 		actions.setOpaque(false);
 		toggle.addActionListener(e -> {
 			if (recording)
@@ -109,10 +111,7 @@ public final class EmbertidePanel extends PluginPanel
 				plugin.discardSave();
 			}
 		});
-		actions.add(toggle);
-		actions.add(retry);
-		actions.add(discard);
-		actions.add(folder);
+		showRecover(false);
 		record.add(actions, BorderLayout.SOUTH);
 
 		JPanel display = new JPanel(new BorderLayout());
@@ -143,8 +142,7 @@ public final class EmbertidePanel extends PluginPanel
 		recording = state.recording;
 		toggle.setText(recording ? "Stop recording" : "Start recording");
 		toggle.setEnabled(state.canToggle);
-		retry.setVisible(plugin.canRecover());
-		discard.setVisible(plugin.canRecover());
+		showRecover(plugin.canRecover());
 		drawFiles(state.current, state.saved);
 	}
 
@@ -229,6 +227,24 @@ public final class EmbertidePanel extends PluginPanel
 		return row;
 	}
 
+	private void showRecover(boolean recover)
+	{
+		if (Boolean.valueOf(recover).equals(recoverShown))
+		{
+			return;
+		}
+		recoverShown = recover;
+		actions.removeAll();
+		actions.add(toggle);
+		if (recover)
+		{
+			actions.add(retry);
+			actions.add(discard);
+		}
+		actions.add(folder);
+		actions.revalidate();
+	}
+
 	/** Read-only text whose caret never scrolls the sidebar when the text changes. */
 	private static JTextArea text(String content)
 	{
@@ -238,6 +254,8 @@ public final class EmbertidePanel extends PluginPanel
 		area.setLineWrap(true);
 		area.setWrapStyleWord(true);
 		area.setOpaque(false);
+		// The look and feel's text margin would indent text past the buttons and links.
+		area.setBorder(BorderFactory.createEmptyBorder());
 		area.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		area.setAlignmentX(LEFT_ALIGNMENT);
 		((DefaultCaret) area.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
