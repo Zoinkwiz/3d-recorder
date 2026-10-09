@@ -177,7 +177,7 @@ final class ReplayRenderer
 			+ (allFloors && placement != null ? " · All floors" : "")
 			+ (waiting == 0 ? "" : " · " + waiting + " assets pending/unavailable")
 			+ (cappedActors == 0 ? "" : " · " + cappedActors + " actors over display limit")
-			+ (capped == 0 ? "" : " · " + capped + " objects omitted; raise Object limit (" + objectLimit + ")")
+			+ (capped == 0 ? "" : " · " + capped + " objects not shown; raise Object limit in the settings (" + objectLimit + ")")
 			+ (scene == null ? "" : !scene.terrain.recorded() ? " · " + NO_GROUND : scene.terrain.sampled ? " · " + PARTIAL_GROUND : "")
 			+ (scene == null || !scene.terrain.truncated ? "" : " · Part of the ground was too large to load")
 			+ (models.mismatchedGround() == 0 ? "" : " · " + models.mismatchedGround() + " ground tiles could not be drawn")

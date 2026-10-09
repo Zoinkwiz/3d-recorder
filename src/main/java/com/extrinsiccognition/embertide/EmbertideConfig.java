@@ -3,12 +3,16 @@ package com.extrinsiccognition.embertide;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(EmbertideConfig.GROUP)
 public interface EmbertideConfig extends Config
 {
 	String GROUP = "embertide";
+
+	@ConfigSection(name = "Watching in your house", description = "How a recording looks when you watch it in your house.", position = 10)
+	String WATCH = "watch";
 
 	@ConfigItem(
 		keyName = "captureRadius",
@@ -109,5 +113,64 @@ public interface EmbertideConfig extends Config
 	default boolean openStudioOnLogout()
 	{
 		return false;
+	}
+
+	@ConfigItem(keyName = "viewerWidth", name = "Miniature width", description = "How many tiles wide a miniature is.", position = 11, section = WATCH)
+	@Range(min = 2, max = 12)
+	default int viewerWidth()
+	{
+		return 4;
+	}
+
+	@ConfigItem(keyName = "viewerRadius", name = "Scene radius", description = "How many tiles around the recorded player are shown.", position = 12, section = WATCH)
+	@Range(min = 4, max = 24)
+	default int viewerRadius()
+	{
+		return 12;
+	}
+
+	@ConfigItem(keyName = "viewerWiderArea", name = "Wider area", description = "Show more of the recorded area around the scene, as many tiles as Extra tiles says.", position = 13, section = WATCH)
+	default boolean viewerWiderArea()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "viewerExtraArea", name = "Extra tiles", description = "How many extra tiles Wider area adds. A miniature keeps its width and shows them smaller.", position = 14, section = WATCH)
+	@Range(max = 24)
+	default int viewerExtraArea()
+	{
+		return 12;
+	}
+
+	@ConfigItem(keyName = "viewerAllFloors", name = "All floors", description = "Show the floors above and below the recorded player. Turn off to see inside buildings.", position = 15, section = WATCH)
+	default boolean viewerAllFloors()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "viewerObjectLimit", name = "Object limit", description = "The most recorded objects shown at once. Raise it if objects are missing; lower it if playback is slow.", position = 16, section = WATCH)
+	@Range(min = 128, max = 8192)
+	default int viewerObjectLimit()
+	{
+		return 4096;
+	}
+
+	@ConfigItem(keyName = "viewerLift", name = "Height above the floor", description = "How high a miniature sits above the floor. 128 is one tile. Life size stands on the floor.", position = 17, section = WATCH)
+	@Range(max = 512)
+	default int viewerLift()
+	{
+		return 96;
+	}
+
+	@ConfigItem(keyName = "viewerGround", name = "Show ground", description = "Draw the recorded ground.", position = 18, section = WATCH)
+	default boolean viewerGround()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "viewerScenery", name = "Show scenery", description = "Draw the recorded scenery.", position = 19, section = WATCH)
+	default boolean viewerScenery()
+	{
+		return true;
 	}
 }

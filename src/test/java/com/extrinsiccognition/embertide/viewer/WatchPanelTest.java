@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JSlider;
-import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JSpinner;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -84,35 +84,19 @@ public class WatchPanelTest
 			assertTrue(find(panel, JTextArea.class).stream().anyMatch(a -> a.getText().equals("a".repeat(42) + "...")));
 		});
 	}
-	@Test public void widerAreaIsOptInAndEnablesItsExtraAreaControl() throws Exception
+	@Test public void lifeSizeIsTheOnlyViewChoiceLeftInTheTab() throws Exception
 	{
 		SwingUtilities.invokeAndWait(() ->
 		{
-			Viewer plugin=mock(Viewer.class); WatchPanel panel=new WatchPanel(plugin);
-			JCheckBox map=find(panel,JCheckBox.class).stream().filter(b->b.getText().equals("Wider area")).findFirst().orElseThrow();
-			JSpinner extra=find(panel,JSpinner.class).stream().filter(s->s.getToolTipText()!=null && s.getToolTipText().startsWith("Extra tiles")).findFirst().orElseThrow();
-			assertFalse(map.isSelected()); assertFalse(extra.isEnabled()); map.doClick(); assertTrue(extra.isEnabled());
-			verify(plugin).settings(true,4,12,96,true,true,true,12,true);
-			extra.setValue(20); verify(plugin).settings(true,4,12,96,true,true,true,20,true);
-			map.doClick(); assertFalse(extra.isEnabled()); verify(plugin).settings(true,4,12,96,true,true,false,20,true);
-			JCheckBox floors=find(panel,JCheckBox.class).stream().filter(b->b.getText().equals("All floors")).findFirst().orElseThrow();
-			assertTrue(floors.isSelected()); floors.doClick(); verify(plugin).settings(true,4,12,96,true,true,false,20,false);
-		});
-	}
-	@Test public void objectLimitCanBeChangedWithoutReplacingOtherSettings() throws Exception
-	{
-		SwingUtilities.invokeAndWait(() ->
-		{
-			Viewer plugin = mock(Viewer.class); WatchPanel panel = new WatchPanel(plugin);
-			JSpinner limit = find(panel, JSpinner.class).stream().filter(s -> s.getToolTipText() != null
-				&& s.getToolTipText().startsWith("Maximum recorded")).findFirst().orElseThrow();
-			assertEquals(4096, limit.getValue()); limit.setValue(8192); verify(plugin).objectLimit(8192);
-			limit.setValue(128); verify(plugin).objectLimit(128);
+			Viewer viewer = mock(Viewer.class); WatchPanel panel = new WatchPanel(viewer);
+			assertTrue(find(panel, JSpinner.class).isEmpty());
+			@SuppressWarnings("unchecked") JComboBox<String> mode = find(panel, JComboBox.class).get(0);
+			mode.setSelectedIndex(1); verify(viewer).miniature(false);
 		});
 	}
 	private static void layout(Container component)
 	{ component.doLayout(); for (Component child : component.getComponents()) { if (child instanceof Container) { layout((Container) child); } } }
-	private static <T> List<T> find(Container parent, Class<T> type)
+	public static <T> List<T> find(Container parent, Class<T> type)
 	{
 		List<T> found = new ArrayList<>();
 		for (Component child : parent.getComponents())

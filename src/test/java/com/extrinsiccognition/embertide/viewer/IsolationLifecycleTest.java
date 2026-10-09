@@ -1,7 +1,9 @@
 package com.extrinsiccognition.embertide.viewer;
 
+import com.extrinsiccognition.embertide.EmbertideConfig;
 import java.lang.reflect.Field;
 import net.runelite.api.Client;
+import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
@@ -12,8 +14,10 @@ import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.callback.RenderCallbackManager;
+import net.runelite.client.events.ConfigChanged;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -63,6 +67,21 @@ public class IsolationLifecycleTest
 		restored();
 		Field message = Viewer.class.getDeclaredField("message"); message.setAccessible(true);
 		assertEquals(HouseIsolation.DID_NOT_HIDE, message.get(plugin));
+	}
+	@Test public void aSettingsChangeReachesThePlacedReplay() throws Exception
+	{
+		Tile portal = mock(Tile.class); GameObject exit = mock(GameObject.class);
+		when(exit.getId()).thenReturn(ObjectID.POH_EXIT_PORTAL); when(portal.getGameObjects()).thenReturn(new GameObject[]{exit});
+		when(view.isInstance()).thenReturn(true); when(view.getId()).thenReturn(-1);
+		when(scene.getTiles()).thenReturn(new Tile[][][]{{{portal}}});
+		Recording recording = new Recording(); Recording.Scene part = new Recording.Scene(0, "osrs:surface");
+		Recording.Actor player = new Recording.Actor("player"); player.poses.add(new Recording.Sample(0, 3200.5, 3200.5, 0, 0, -1, 0, -1, -1));
+		part.actors.put("player", player); recording.scenes.add(part);
+		EmbertideConfig config = mock(EmbertideConfig.class, CALLS_REAL_METHODS); doReturn(8).when(config).viewerWidth();
+		inject("recording", recording); inject("config", config);
+		ConfigChanged event = new ConfigChanged(); event.setGroup(EmbertideConfig.GROUP); event.setKey("viewerWidth");
+		plugin.onConfigChanged(event);
+		assertEquals(8 / 25.0, renderer.placement().scale, 1e-9); assertEquals(-96, renderer.placement().anchorZ);
 	}
 	@Test public void aRendererThatHidesTheHouseKeepsTheReplay()
 	{

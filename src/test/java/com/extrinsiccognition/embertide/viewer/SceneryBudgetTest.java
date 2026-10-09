@@ -51,10 +51,10 @@ public class SceneryBudgetTest
 		Recording recording = recording(); objects(recording.sceneAt(0), 3232, 42, 0);
 		ReplayRenderer renderer = renderer(recording, false);
 		renderer.draw(recording, 0, false, true);
-		assertEquals(3232, registered.size()); assertFalse(renderer.status(), renderer.status().contains("omitted"));
+		assertEquals(3232, registered.size()); assertFalse(renderer.status(), renderer.status().contains("not shown"));
 		Placement anchor = renderer.placement();
 		renderer.objectLimit(384); renderer.draw(recording, 0, false, true);
-		assertEquals(384, registered.size()); assertTrue(renderer.status(), renderer.status().contains("2848 objects omitted"));
+		assertEquals(384, registered.size()); assertTrue(renderer.status(), renderer.status().contains("2848 objects not shown"));
 		renderer.objectLimit(4096); renderer.draw(recording, 0, false, true);
 		assertEquals(3232, registered.size()); assertSame(anchor, renderer.placement());
 		renderer.draw(recording, 0, false, true); assertEquals(3232, registered.size());
@@ -70,7 +70,7 @@ public class SceneryBudgetTest
 		// The first pass learns the invisible asset; a second pass uses that classification.
 		renderer.draw(recording, 0, false, true); renderer.draw(recording, 0, false, true);
 		assertEquals(128, registered.size()); assertFalse(renderer.status(), renderer.status().contains("pending"));
-		assertFalse(renderer.status(), renderer.status().contains("omitted"));
+		assertFalse(renderer.status(), renderer.status().contains("not shown"));
 		renderer.clear(); assertTrue(registered.isEmpty());
 	}
 }

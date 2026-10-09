@@ -1,5 +1,6 @@
 package com.extrinsiccognition.embertide.viewer;
 
+import com.extrinsiccognition.embertide.EmbertideConfig;
 import java.awt.Component;
 import java.io.IOException;
 import java.util.Comparator;
@@ -29,6 +30,7 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.callback.RenderCallbackManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.util.Filepath;
 import org.slf4j.Logger;
@@ -41,6 +43,7 @@ public class Viewer
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
 	@Inject private RenderCallbackManager renderCallbacks;
+	@Inject private EmbertideConfig config;
 	private volatile boolean enabled;
 	private volatile WatchPanel panel;
 	private volatile Filepath folder;
@@ -63,18 +66,16 @@ public class Viewer
 	private int size = 4, radius = 12, lift = 96, rotation;
 	private int baseX, baseY, world;
 	private long nextUi;
-	private String filename = "Choose a saved recording to begin.";
-	private String message = "Enter your POH to place a replay.";
+	private String filename = "", message = "";
 
 	public void startUp()
 	{
 		lifecycle.incrementAndGet(); enabled = true;
-		miniature = ground = scenery = hideSurroundings = true; size = 4; radius = 12; lift = 96; rotation = 0;
-		surroundingMap = false; extraArea = 12; allFloors = true;
+		miniature = hideSurroundings = true; rotation = 0;
 		clock.speed(1, System.nanoTime()); clock.loop(true);
-		filename = "Choose a saved recording to begin."; message = "Enter your POH to place a replay.";
+		filename = ""; message = "";
 		worker = Executors.newSingleThreadExecutor(task -> { Thread t = new Thread(task, "Embertide recording reader"); t.setDaemon(true); return t; });
-		renderer = new ReplayRenderer(client);
+		renderer = new ReplayRenderer(client); readConfig();
 		isolation = new HouseIsolation(client, renderCallbacks);
 		onClient(() -> { house = HouseGate.containsHouse(client.getTopLevelWorldView()); publish(); });
 	}
@@ -166,7 +167,7 @@ public class Viewer
 					if (token != generation.get()) { return; }
 					clearProjection("Recording replaced."); renderer.close(); recording = result;
 					clock.load(result.duration, System.nanoTime()); filename = name; loading = false;
-					message = ground ? "Loaded. Choose a view and place it in your house."
+					message = ground ? "Loaded. In your house, press Place here or right-click a floor tile."
 						: "Loaded. " + (cells ? ReplayRenderer.PARTIAL_GROUND : ReplayRenderer.NO_GROUND); publish();
 				});
 			}
@@ -180,14 +181,14 @@ public class Viewer
 	void seek(double time) { onClient(() -> { clock.seek(time, System.nanoTime()); draw(); publish(); }); }
 	void speed(double speed) { onClient(() -> clock.speed(speed, System.nanoTime())); }
 	void loop(boolean loop) { onClient(() -> clock.loop(loop)); }
-	void clear() { onClient(() -> { clearProjection("Projection cleared."); publish(); }); }
+	void clear() { onClient(() -> { clearProjection("Replay cleared."); publish(); }); }
 	void rotate() { onClient(() -> { rotation = (rotation + 1) & 3; replace(); }); }
 	void hideSurroundings(boolean hide)
 	{
 		onClient(() ->
 		{
 			hideSurroundings = hide;
-			if (!hide) { isolation.close(); message = "House visible. Clear removes the replay."; }
+			if (!hide) { isolation.close(); if (renderer.placed()) { message = "House showing. Clear removes the replay."; } }
 			else if (!isolation.supported()) { message = isolation.problem(); }
 			else if (renderer.placed())
 			{
@@ -197,25 +198,24 @@ public class Viewer
 			publish();
 		});
 	}
-	void settings(boolean miniature, int size, int radius, int lift, boolean ground, boolean scenery, boolean surroundingMap, int extraArea, boolean allFloors)
+	void miniature(boolean on) { onClient(() -> { if (miniature != on) { miniature = on; replace(); } publish(); }); }
+	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
-		onClient(() ->
+		if (EmbertideConfig.GROUP.equals(event.getGroup()) && event.getKey().startsWith("viewer"))
 		{
-			boolean geometryChanged = this.miniature != miniature || this.size != size || this.radius != radius || this.lift != lift
-				|| this.surroundingMap != surroundingMap || (surroundingMap && this.extraArea != extraArea) || this.allFloors != allFloors;
-			this.miniature = miniature; this.size = size; this.radius = radius; this.lift = lift;
-			this.ground = ground; this.scenery = scenery;
-			this.surroundingMap = surroundingMap; this.extraArea = Math.max(0, Math.min(24, extraArea));
-			this.allFloors = allFloors;
-			if (geometryChanged) { replace(); }
-			publish();
-		});
+			onClient(() -> { readConfig(); replace(); publish(); });
+		}
+	}
+	private void readConfig()
+	{
+		if (config == null) { return; }
+		size = config.viewerWidth(); radius = config.viewerRadius(); lift = config.viewerLift();
+		surroundingMap = config.viewerWiderArea(); extraArea = config.viewerExtraArea();
+		allFloors = config.viewerAllFloors(); renderer.objectLimit(config.viewerObjectLimit());
+		ground = config.viewerGround(); scenery = config.viewerScenery();
 	}
 	void placeHere()
 	{ onClient(() -> { if (client.getLocalPlayer() != null) { place(client.getLocalPlayer().getLocalLocation(), true); } }); }
-
-	void objectLimit(int limit)
-	{ onClient(() -> { renderer.objectLimit(limit); draw(); publish(); }); }
 
 	private void place(LocalPoint anchor, boolean newOrigin)
 	{
@@ -223,13 +223,13 @@ public class Viewer
 		WorldView view = client.getTopLevelWorldView();
 		house = HouseGate.containsHouse(view);
 		if (!house || anchor == null || view == null || anchor.getWorldView() != view.getId())
-		{ message = "Enter your POH and place the replay near its exit portal."; publish(); return; }
+		{ message = "Go into your house to place the replay."; publish(); return; }
 		if (hideSurroundings && !isolation.supported()) { message = isolation.problem(); publish(); return; }
 		Recording.Scene scene = recording.sceneAt(clock.time());
 		if (newOrigin || sourceOrigin == null || scene != selectedScene) { sourceOrigin = scene.origin(clock.time()); }
 		if (sourceOrigin == null) { clearProjection("This part has no recorded actors. Seek to another moment."); publish(); return; }
 		renderer.place(scene, sourceOrigin, anchor, view.getPlane(), Perspective.getTileHeight(client, anchor, view.getPlane()),
-			miniature, size, radius, rotation, lift, surroundingMap, extraArea, allFloors);
+			miniature, size, radius, rotation, miniature ? lift : 0, surroundingMap, extraArea, allFloors);
 		if (hideSurroundings) { isolation.hide(view.getScene()); }
 		selectedScene = scene; baseX = view.getBaseX(); baseY = view.getBaseY(); world = client.getWorld();
 		message = miniature ? "Miniature placed. Press Play or scrub the timeline." : "Life-size scene placed around you. Press Play or scrub.";
@@ -282,12 +282,12 @@ public class Viewer
 	@Subscribe public void onGameTick(GameTick event)
 	{
 		house = HouseGate.containsHouse(client.getTopLevelWorldView());
-		if (!house && renderer.placed()) { clearProjection("House no longer visible. Place the replay again inside your POH."); }
+		if (!house && renderer.placed()) { clearProjection("You left your house, so the replay was cleared."); }
 	}
 	@Subscribe public void onGameStateChanged(GameStateChanged event)
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
-		{ house = false; clearProjection("Enter your POH and place the replay again."); publish(); }
+		{ house = false; clearProjection(renderer.placed() ? "Replay cleared. Place it again in your house." : message); publish(); }
 	}
 	@Subscribe public void onMenuOpened(MenuOpened event)
 	{

@@ -37,15 +37,19 @@ recording.
 
 ## Watch it in your house
 
-The side panel's **Watch in your house** section plays a saved recording back
-in your player-owned house, as a small diorama (**Miniature**) or around you
-at full size (**Life size**).
+The side panel's **Watch** tab plays a saved recording back in your
+player-owned house, as a small diorama (**Miniature**) or around you at full
+size (**Life size**).
 
-1. Press **Watch a recording…** and pick one, or press **Watch in your house**
-   under a part saved this session.
+1. Press **Open recording…** and pick one, or press **Watch in your house**
+   under a part saved this session in the **Record** tab.
 2. Go into your house, ideally an open garden or an empty room.
 3. Press **Place here**, or right-click a floor tile and choose **Place
    Embertide replay**. Then play, pause, scrub, change the speed or rotate it.
+
+The size of the miniature, how much of the area it shows, the floors, the
+object limit and its height above the floor are in the plugin's settings,
+under **Watching in your house**.
 
 Only you can see it. The recorded figures and scenery are pictures: they
 can't be clicked, don't block anyone, and your house still decides where you

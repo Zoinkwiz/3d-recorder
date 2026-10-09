@@ -12,7 +12,6 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
@@ -20,6 +19,8 @@ import javax.swing.Timer;
 import javax.swing.text.DefaultCaret;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.ui.components.materialtabs.MaterialTab;
+import net.runelite.client.ui.components.materialtabs.MaterialTabGroup;
 import net.runelite.client.util.LinkBrowser;
 
 public final class EmbertidePanel extends PluginPanel
@@ -31,6 +32,7 @@ public final class EmbertidePanel extends PluginPanel
 	private final JButton retry = new JButton("Retry saving");
 	private final JButton discard = new JButton("Discard unsaved recording");
 	private final Timer refresh;
+	private final MaterialTab watchTab;
 	private boolean recording;
 	private String drawn = "";
 	private final EmbertidePlugin plugin;
@@ -44,12 +46,6 @@ public final class EmbertidePanel extends PluginPanel
 		JPanel top = new JPanel();
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 		top.setOpaque(false);
-		JLabel title = new JLabel("3D Replay Recorder");
-		title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
-		title.setForeground(ColorScheme.BRAND_ORANGE);
-		title.setAlignmentX(LEFT_ALIGNMENT);
-		top.add(title);
-		top.add(Box.createVerticalStrut(6));
 		JTextArea where = text("Play as normal. When you're done, open your session in the Embertide app or at");
 		top.add(where);
 		JLabel studio = new JLabel("<html><u>embertide.gg/studio</u></html>");
@@ -66,7 +62,9 @@ public final class EmbertidePanel extends PluginPanel
 			}
 		});
 		top.add(studio);
-		add(top, BorderLayout.NORTH);
+		JPanel record = new JPanel(new BorderLayout(0, 8));
+		record.setOpaque(false);
+		record.add(top, BorderLayout.NORTH);
 
 		JPanel middle = new JPanel();
 		middle.setLayout(new BoxLayout(middle, BoxLayout.Y_AXIS));
@@ -78,7 +76,7 @@ public final class EmbertidePanel extends PluginPanel
 		files.setAlignmentX(LEFT_ALIGNMENT);
 		middle.add(files);
 		middle.add(Box.createVerticalGlue());
-		add(middle, BorderLayout.CENTER);
+		record.add(middle, BorderLayout.CENTER);
 
 		JPanel actions = new JPanel(new GridLayout(0, 1, 0, 6));
 		actions.setOpaque(false);
@@ -115,16 +113,19 @@ public final class EmbertidePanel extends PluginPanel
 		actions.add(retry);
 		actions.add(discard);
 		actions.add(folder);
-		JPanel bottom = new JPanel();
-		bottom.setLayout(new BoxLayout(bottom, BoxLayout.Y_AXIS));
-		bottom.setOpaque(false);
-		actions.setAlignmentX(LEFT_ALIGNMENT);
-		bottom.add(actions);
-		bottom.add(Box.createVerticalStrut(16));
-		JComponent watch = plugin.viewer().panel();
-		watch.setAlignmentX(LEFT_ALIGNMENT);
-		bottom.add(watch);
-		add(bottom, BorderLayout.SOUTH);
+		record.add(actions, BorderLayout.SOUTH);
+
+		JPanel display = new JPanel(new BorderLayout());
+		display.setOpaque(false);
+		MaterialTabGroup tabs = new MaterialTabGroup(display);
+		tabs.setLayout(new GridLayout(1, 2));
+		MaterialTab recordTab = new MaterialTab("Record", tabs, record);
+		watchTab = new MaterialTab("Watch", tabs, plugin.viewer().panel());
+		tabs.addTab(recordTab);
+		tabs.addTab(watchTab);
+		tabs.select(recordTab);
+		add(tabs, BorderLayout.NORTH);
+		add(display, BorderLayout.CENTER);
 
 		this.plugin = plugin;
 		refresh = new Timer(500, e -> render(plugin));
@@ -183,10 +184,16 @@ public final class EmbertidePanel extends PluginPanel
 			String note = file.problem.isEmpty()
 				? String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
 				: "not saved: " + file.problem;
-			files.add(row(file.name, note, !file.problem.isEmpty(), file.problem.isEmpty() ? () -> plugin.viewer().load(file.name) : null));
+			files.add(row(file.name, note, !file.problem.isEmpty(), file.problem.isEmpty() ? () -> watch(file.name) : null));
 		}
 		files.revalidate();
 		files.repaint();
+	}
+
+	private void watch(String name)
+	{
+		plugin.viewer().load(name);
+		watchTab.select();
 	}
 
 	private static JPanel row(String name, String note, boolean problem, Runnable watch)
