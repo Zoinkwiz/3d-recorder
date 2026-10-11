@@ -33,6 +33,8 @@ import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
 import net.runelite.api.Projectile;
+import net.runelite.api.IndexedObjectSet;
+import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -655,7 +657,8 @@ public final class OsrsCapture
 		if (actor == null || me == null) { return false; }
 		if (actor == me) { return true; }
 		WorldView view = client.getTopLevelWorldView();
-		WorldPoint at = me.getWorldLocation();
+		seeBoats(view);
+		WorldPoint at = onMap(me);
 		return view != null && at != null
 			&& ((actor instanceof NPC && config.trackNpcs())
 				|| (actor instanceof Player && config.trackPlayers() && actor.getName() != null))
@@ -707,7 +710,7 @@ public final class OsrsCapture
 		}
 		if (actor instanceof Player) { appearance((Player) actor, id, t); }
 		if (npc) { npcVariant((NPC) actor, id, t); }
-		pose(client.getTopLevelWorldView(), actor, id, actor.getWorldLocation(), t, false,
+		pose(client.getTopLevelWorldView(), actor, id, onMap(actor), t, false,
 			npc ? ((NPC) actor).getId() : -1);
 		return recording;
 	}
@@ -1111,6 +1114,7 @@ public final class OsrsCapture
 			return false;
 		}
 		WorldView view = client.getTopLevelWorldView();
+		seeBoats(view);
 		Player me = client.getLocalPlayer();
 		if (view == null || me == null || me.getWorldLocation() == null)
 		{
@@ -1128,7 +1132,7 @@ public final class OsrsCapture
 			t = session.time();
 			rediscover = true;
 		}
-		WorldPoint at = me.getWorldLocation();
+		WorldPoint at = onMap(me);
 		int cellsBefore = known.size();
 		int[] scene = null;
 		if (rediscover) { seedActors(view); }
@@ -1190,7 +1194,7 @@ public final class OsrsCapture
 				if (announce(id, name, NPC_COLOR, "npc", npc.getId(), shownNpcId(npc), npc.getCombatLevel(), t))
 				{
 					npcVariant(npc, id, t);
-					crowdPose(crowd, view, me, npc, id, npc.getWorldLocation(), npc.getId());
+					crowdPose(crowd, view, me, npc, id, onMap(npc), npc.getId());
 					icons = headIcon(icons, npc, id);
 					npcsSeen++;
 				}
@@ -1201,7 +1205,7 @@ public final class OsrsCapture
 				if (announce(id, seen ? null : pseudonym(player.getName()), OTHER_PLAYER_COLOR, "player", -1, -1, -1, t))
 				{
 					appearance(player, id, t);
-					crowdPose(crowd, view, me, player, id, player.getWorldLocation(), -1);
+					crowdPose(crowd, view, me, player, id, onMap(player), -1);
 					icons = headIcon(icons, player, id);
 					playersSeen++;
 				}
@@ -1254,12 +1258,13 @@ public final class OsrsCapture
 			return;
 		}
 		WorldView view = client.getTopLevelWorldView();
+		seeBoats(view);
 		Player me = client.getLocalPlayer();
 		if (view == null || me == null || me.getWorldLocation() == null)
 		{
 			return;
 		}
-		WorldPoint at = me.getWorldLocation();
+		WorldPoint at = onMap(me);
 		Bounds bounds = new Bounds(view, at);
 		JsonArray samples = new JsonArray();
 		motionSample(samples, me, PLAYER, at, bounds);
@@ -1268,7 +1273,7 @@ public final class OsrsCapture
 		{
 			String id = idOf(other);
 			if (!presentActors.contains(other) || !actors.contains(id)) { continue; }
-			WorldPoint here = other.getWorldLocation();
+			WorldPoint here = onMap(other);
 			if (other == me || (tracked(other, npcs, players) && bounds.holds(here)))
 			{
 				motionSample(samples, other, id, here, bounds);
@@ -1373,14 +1378,14 @@ public final class OsrsCapture
 	/** The actor's visible state when it changed; world is its tile, read this cycle. */
 	private void motionSample(JsonArray samples, Actor actor, String id, WorldPoint world, Bounds bounds)
 	{
-		LocalPoint local = actor.getLocalLocation();
+		LocalPoint local = localOnMap(actor);
 		if (local == null || world == null)
 		{
 			return;
 		}
 		int baseX = bounds.baseX, baseY = bounds.baseY;
 		int x = local.getX(), y = local.getY(), plane = world.getPlane();
-		int orientation = actor.getCurrentOrientation(), animation = actor.getAnimation();
+		int orientation = facing(actor), animation = actor.getAnimation();
 		int frame = actor.getAnimationFrame(), poseAnimation = actor.getPoseAnimation();
 		long[] previous = lastMotion.get(id);
 		// The viewer advances animation frames from elapsed time.
@@ -1489,7 +1494,7 @@ public final class OsrsCapture
 		for (Actor actor : presentActors)
 		{
 			if (actor == me || !tracked(actor, npcs, players)) { continue; }
-			WorldPoint here = actor.getWorldLocation();
+			WorldPoint here = onMap(actor);
 			if (!bounds.holds(here)) { continue; }
 			order[candidates.size()] = (long) at.distanceTo(here) << 32 | candidates.size();
 			candidates.add(actor);
@@ -1500,10 +1505,72 @@ public final class OsrsCapture
 		return found.size() > TRACKED_PER_TICK ? found.subList(0, TRACKED_PER_TICK) : found;
 	}
 
-	/** Test loaded-scene bounds and plane; this is not an on-screen visibility check. */
-	private static boolean drawn(WorldView view, WorldPoint at, Actor actor)
+	/** The main world's view as this tick read it; set where a tick reads it. */
+	private WorldView mainView;
+	/** Whether any boat is loaded this tick: on land no actor pays for the boat lookup. */
+	private boolean boats;
+
+	private void seeBoats(WorldView view)
 	{
-		WorldPoint here = actor == null ? null : actor.getWorldLocation();
+		mainView = view;
+		IndexedObjectSet<? extends WorldEntity> entities = view == null ? null : view.worldEntities();
+		boats = entities != null && entities.iterator().hasNext();
+	}
+
+	/**
+	 * The Sailing boat an actor stands on, or null on land. On a boat the client
+	 * reports the actor in the boat's own world view, whose tiles sit far off the
+	 * map (x near 15000); the boat's world entity places that view on the map
+	 * (3d-recorder#5).
+	 */
+	private WorldEntity boatOf(Actor actor)
+	{
+		if (!boats || actor == null) { return null; }
+		WorldView own = actor.getWorldView();
+		if (own == null || own == mainView || own.isTopLevel()) { return null; }
+		WorldView top = client.getTopLevelWorldView();
+		if (top == null) { return null; }
+		mainView = top;
+		for (WorldEntity entity : top.worldEntities())
+		{
+			if (entity != null && entity.getWorldView() == own) { return entity; }
+		}
+		return null;
+	}
+
+	/** The actor's local point in the main world's scene, carried off its boat when it is on one. */
+	private LocalPoint localOnMap(Actor actor)
+	{
+		LocalPoint local = actor.getLocalLocation();
+		WorldEntity boat = local == null ? null : boatOf(actor);
+		if (boat == null) { return local; }
+		LocalPoint main = boat.transformToMainWorld(local);
+		return main != null ? main : local;
+	}
+
+	/** The map tile the actor stands on: its own tile on land, the tile under it on a boat. */
+	private WorldPoint onMap(Actor actor)
+	{
+		WorldPoint at = actor.getWorldLocation();
+		WorldEntity boat = at == null ? null : boatOf(actor);
+		if (boat == null || mainView == null) { return at; }
+		LocalPoint local = actor.getLocalLocation();
+		LocalPoint main = local == null ? null : boat.transformToMainWorld(local);
+		return main == null ? at : WorldPoint.fromLocal(mainView, main.getX(), main.getY(), mainView.getPlane());
+	}
+
+	/** The actor's facing on the map: on a boat its facing on deck turned by the boat's heading. */
+	private int facing(Actor actor)
+	{
+		WorldEntity boat = boatOf(actor);
+		int orientation = actor.getCurrentOrientation();
+		return boat == null ? orientation : (orientation + boat.getOrientation()) & 2047;
+	}
+
+	/** Test loaded-scene bounds and plane; this is not an on-screen visibility check. */
+	private boolean drawn(WorldView view, WorldPoint at, Actor actor)
+	{
+		WorldPoint here = actor == null ? null : onMap(actor);
 		return here != null && SceneMapper.inScene(view.getBaseX(), view.getBaseY(), view.getSizeX(), view.getSizeY(),
 			at.getPlane(), here.getX(), here.getY(), here.getPlane());
 	}
@@ -1660,7 +1727,7 @@ public final class OsrsCapture
 		payload.add("coords", coords);
 		payload.addProperty("dimension", session.dimension);
 		payload.addProperty("plane", at.getPlane());
-		payload.addProperty("yaw", SceneMapper.yawDegrees(actor.getCurrentOrientation()));
+		payload.addProperty("yaw", SceneMapper.yawDegrees(facing(actor)));
 		if (look)
 		{
 			payload.addProperty("pitch", 0);
@@ -1672,7 +1739,7 @@ public final class OsrsCapture
 		{
 			osrs.addProperty("npc_id", npcId);
 		}
-		osrs.addProperty("orientation", actor.getCurrentOrientation());
+		osrs.addProperty("orientation", facing(actor));
 		osrs.addProperty("animation", actor.getAnimation());
 		osrs.addProperty("pose_animation", actor.getPoseAnimation());
 		osrs.addProperty("animation_frame", actor.getAnimationFrame());
@@ -1913,7 +1980,7 @@ public final class OsrsCapture
 		entry.add(at.getY());
 		entry.add(at.getPlane());
 		entry.add(ground[1] + 1);
-		entry.add(actor.getCurrentOrientation());
+		entry.add(facing(actor));
 		entry.add(actor.getAnimation());
 		entry.add(actor.getPoseAnimation());
 		entry.add(actor.getAnimationFrame());
@@ -2419,6 +2486,7 @@ public final class OsrsCapture
 		}
 		Player me = client.getLocalPlayer();
 		WorldView view = client.getTopLevelWorldView();
+		seeBoats(view);
 		WorldPoint at = tile.getWorldLocation();
 		if (me == null || view == null || at == null || me.getWorldLocation() == null)
 		{
@@ -2452,7 +2520,7 @@ public final class OsrsCapture
 			payload.add("objects", objects);
 			if (emit(RowTypes.OBJECT, t, payload, PLAYER, false)) { objectEvents++; }
 		}
-		WorldPoint mine = me.getWorldLocation();
+		WorldPoint mine = onMap(me);
 		int dx = at.getX() - mine.getX();
 		int dy = at.getY() - mine.getY();
 		boolean nearby = at.getPlane() == mine.getPlane() && dx * dx + dy * dy <= radius * radius;
