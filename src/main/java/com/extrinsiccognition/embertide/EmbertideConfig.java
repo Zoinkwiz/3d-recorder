@@ -11,7 +11,7 @@ public interface EmbertideConfig extends Config
 {
 	String GROUP = "embertide";
 
-	@ConfigSection(name = "Watching in your house", description = "How a recording looks when you watch it in your house.", position = 10)
+	@ConfigSection(name = "Watching in your house", description = "How a recording looks when you watch it in your house.", position = 11)
 	String WATCH = "watch";
 
 	@ConfigItem(
@@ -110,7 +110,7 @@ public interface EmbertideConfig extends Config
 		description = "Send this session to the Embertide app on this computer as you play, so it can be drawn while you are still in it. Your recording is still saved to a file exactly as it is now, and nothing leaves this computer. Off unless you turn it on.",
 		// Own warning text: the Hub default would name an internet server.
 		warning = "Sends this session's rows to the Embertide app on this computer over a local connection while you play. Nothing is sent anywhere else by the plugin.",
-		position = 8
+		position = 9
 	)
 	default boolean liveToApp()
 	{
@@ -121,7 +121,7 @@ public interface EmbertideConfig extends Config
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
 		description = "Open Studio in your browser when you log out, ready for you to drag your recording in.",
-		position = 9
+		position = 10
 	)
 	default boolean openStudioOnLogout()
 	{
