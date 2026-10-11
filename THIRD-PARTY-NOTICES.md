@@ -14,7 +14,9 @@
 - The Gradle 8.10 wrapper is distributed under the Apache License 2.0
   (<https://www.apache.org/licenses/LICENSE-2.0>).
 
-Both copyright holders above license their code under the BSD 2-Clause License:
+Both copyright holders above license their code under the BSD 2-Clause
+License. `Definitions.java` and `BodyColors.java` carry the full notice in
+their headers, so it travels with the source and with any build of it:
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
