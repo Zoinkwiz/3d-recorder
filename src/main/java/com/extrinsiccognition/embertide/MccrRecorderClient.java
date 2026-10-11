@@ -113,7 +113,6 @@ public final class MccrRecorderClient implements Recorder
 	private volatile String captureId;
 	private volatile String capability;
 	private volatile Lifetime lifetime = Lifetime.UNAVAILABLE;
-	private volatile boolean studioRequested;
 
 	public MccrRecorderClient(OkHttpClient http, Gson gson, ScheduledExecutorService executor, RecorderEndpoint endpoint)
 	{
@@ -129,12 +128,6 @@ public final class MccrRecorderClient implements Recorder
 		// Without one, endpoint.json is read when the app appears.
 		this.rediscover = endpoint == null;
 		this.reserve = Math.min(4096, MAX_PENDING_BYTES / 4);
-	}
-
-	@Override
-	public String destination()
-	{
-		return "";
 	}
 
 	public State state()
@@ -160,11 +153,6 @@ public final class MccrRecorderClient implements Recorder
 	public String captureId()
 	{
 		return captureId;
-	}
-
-	public boolean studioRequested()
-	{
-		return studioRequested;
 	}
 
 	/** It was live, and the app or the lifetime socket went away; it is being tried again. */
@@ -323,54 +311,6 @@ public final class MccrRecorderClient implements Recorder
 		CompletableFuture<Void> failed = new CompletableFuture<>();
 		failed.completeExceptionally(new IOException(error.isEmpty() ? "Recording failed." : error));
 		return failed;
-	}
-
-	/** Ask the app to open this capture in Studio. */
-	public CompletableFuture<Void> openStudio()
-	{
-		if (captureId == null || capability == null)
-		{
-			return failed("This memory is not connected to Studio yet.");
-		}
-		CompletableFuture<Void> done = new CompletableFuture<>();
-		http.newCall(post("/v1/mccr/" + captureId + "/studio", "{}".getBytes(StandardCharsets.UTF_8), capability)).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				done.completeExceptionally(new IOException("Studio did not accept this memory. Please try again."));
-			}
-
-			@Override
-			public void onResponse(Call call, Response response)
-			{
-				JsonObject result = null;
-				try (Response r = response)
-				{
-					result = r.isSuccessful() && r.body() != null ? parse(r.body().string()) : null;
-				}
-				catch (IOException ignored)
-				{
-					// reported below
-				}
-				if (result != null && result.has("ok") && result.get("ok").isJsonPrimitive() && result.get("ok").getAsBoolean())
-				{
-					done.complete(null);
-				}
-				else
-				{
-					done.completeExceptionally(new IOException("Studio did not accept this memory. Please try again."));
-				}
-			}
-		});
-		return done;
-	}
-
-	private static CompletableFuture<Void> failed(String message)
-	{
-		CompletableFuture<Void> future = new CompletableFuture<>();
-		future.completeExceptionally(new IOException(message));
-		return future;
 	}
 
 	/** Sends the next open or batch, one call at a time. Runs on the executor and never waits on the network. */
@@ -630,11 +570,6 @@ public final class MccrRecorderClient implements Recorder
 		{
 			failed(Failure.PERMANENT, "Embertide did not acknowledge the recording sequence.");
 			return;
-		}
-		if (result.has("studioRequested") && result.get("studioRequested").isJsonPrimitive()
-			&& result.get("studioRequested").getAsBoolean())
-		{
-			studioRequested = true;
 		}
 		synchronized (lock)
 		{

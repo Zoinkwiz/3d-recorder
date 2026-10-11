@@ -81,12 +81,7 @@ public final class RecorderSmoke
 			end.addProperty("open_studio", true);
 			require(client.enqueue(session.record("mccr.capture_end", t, end, OsrsCapture.PLAYER), true), "capture_end");
 			client.finish().get(15, TimeUnit.SECONDS);
-			System.out.println("smoke: finished state=" + client.state() + " studioRequested=" + client.studioRequested());
-			if (!client.studioRequested())
-			{
-				client.openStudio().get(10, TimeUnit.SECONDS);
-				System.out.println("smoke: studio requested explicitly");
-			}
+			System.out.println("smoke: finished state=" + client.state());
 			client.closeLifetime();
 			System.out.println("smoke: ok " + client.captureId());
 		}
