@@ -111,6 +111,29 @@ public class MccrFileRecorderTest
 	}
 
 	@Test
+	public void aFailedWriteRebuildsThePartialFromDisk() throws Exception
+	{
+		MccrFileRecorder recorder = recorder();
+		List<String> rows = record(recorder, 300);
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		rows.addAll(record(recorder, 1, 300));
+		settle();
+		recorder.dropStream();
+		Thread.sleep(MccrFileRecorder.FLUSH_NANOS / 1_000_000 + 50);
+		rows.addAll(record(recorder, 200, 301));
+		settle();
+		// A crash now leaves one readable partial with every row.
+		List<Path> partials = partials();
+		assertEquals(1, partials.size());
+		assertEquals(rows, lines(Files.readAllBytes(partials.get(0))));
+		recorder.dropStream();
+		rows.addAll(record(recorder, 50, 501));
+		recorder.finish().get(10, TimeUnit.SECONDS);
+		assertEquals(rows, lines(Files.readAllBytes(sealed())));
+		assertEquals(0, partials().size());
+	}
+
+	@Test
 	public void discardDeletesThePartial() throws Exception
 	{
 		MccrFileRecorder recorder = recorder();

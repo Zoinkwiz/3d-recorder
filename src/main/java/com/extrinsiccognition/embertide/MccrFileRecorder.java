@@ -332,6 +332,15 @@ public final class MccrFileRecorder implements Recorder
 		broken.deleteIfExists();
 	}
 
+	/** Test only: closes the stream as a failed write would. */
+	void dropStream()
+	{
+		synchronized (io)
+		{
+			closeStream();
+		}
+	}
+
 	private void closeStream()
 	{
 		if (out != null)
