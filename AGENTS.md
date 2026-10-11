@@ -7,12 +7,18 @@ before changing behaviour; it is the Plugin Hub's description of the plugin.
 
 - Build and test with an arm64 JDK 11: `./gradlew test jar`. Gradle 8.10 will
   not start on a JDK above 23. `./gradlew run` starts a development client.
-- Keep the whole repository under 200k tokens with room for the live link
-  (`dev/raids`): `scripts/size-budget.sh HEAD main dev/raids`.
-- Versions: bump `build.gradle` and `runelite-plugin.properties` together, in a
-  commit of their own ("Bump version to X").
-- No network, no new runtime dependencies, no file outside the plugin's own
-  folder: recordings are written and read only through `Filepath`.
+- Keep the whole repository under 200k tokens: `scripts/size-budget.sh`. The
+  Plugin Hub's review bot counts `src/main/java` without comments and skips a
+  plugin above 200k.
+- Versions: bump `build.gradle`, `runelite-plugin.properties` and
+  `MccrSession.VERSION` together, in a commit of their own ("Bump version to
+  X"); `RecorderVersionTest` checks they agree.
+- No new runtime dependencies. Recordings are written and read only through
+  `Filepath`. The only network is the opt-in live link (Show live in
+  Embertide, off by default): `LiveMirror` copies rows to the Embertide app on
+  loopback through the injected `OkHttpClient`, and `RecorderEndpoint` reads
+  the app's `endpoint.json` from the app's own folder. Both are Plugin Hub
+  review items; keep them behind that setting.
 - One format, one reader: row type names are in `RowTypes`, the header in
   `MccrSession` and `MccrFileRecorder.MOTION_XY`, the ground layout in
   `GroundRows` (writer and decoder side by side). Change a row and its reader
