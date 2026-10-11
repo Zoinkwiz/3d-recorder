@@ -289,7 +289,7 @@ public final class MccrRecorderClient implements Recorder
 		{
 			if (state == State.FAILED)
 			{
-				return failedFuture();
+				return CompletableFuture.failedFuture(new IOException(error.isEmpty() ? "Recording failed." : error));
 			}
 			if (state == State.IDLE)
 			{
@@ -304,13 +304,6 @@ public final class MccrRecorderClient implements Recorder
 		}
 		run(this::pump);
 		return finished;
-	}
-
-	private CompletableFuture<Void> failedFuture()
-	{
-		CompletableFuture<Void> failed = new CompletableFuture<>();
-		failed.completeExceptionally(new IOException(error.isEmpty() ? "Recording failed." : error));
-		return failed;
 	}
 
 	/** Sends the next open or batch, one call at a time. Runs on the executor and never waits on the network. */

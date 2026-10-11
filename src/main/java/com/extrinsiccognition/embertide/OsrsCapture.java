@@ -2618,7 +2618,7 @@ public final class OsrsCapture
 		boolean queued = emit("mccr.capture_end", sealedAt, payload, PLAYER, true);
 		CompletableFuture<Void> done = queued
 			? recorder.finish()
-			: failed("Could not add the recording end record.");
+			: CompletableFuture.failedFuture(new IllegalStateException("Could not add the recording end record."));
 		if (openStudio)
 		{
 			done = done.thenCompose(ignored -> recorder.openStudio());
@@ -2638,12 +2638,5 @@ public final class OsrsCapture
 			}
 		});
 		return finishing;
-	}
-
-	private static CompletableFuture<Void> failed(String message)
-	{
-		CompletableFuture<Void> future = new CompletableFuture<>();
-		future.completeExceptionally(new IllegalStateException(message));
-		return future;
 	}
 }
