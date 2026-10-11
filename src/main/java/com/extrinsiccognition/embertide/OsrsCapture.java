@@ -20,6 +20,7 @@ import net.runelite.api.DecorativeObject;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
 import net.runelite.api.GraphicsObject;
+import net.runelite.api.HeadIcon;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.ObjectComposition;
@@ -71,6 +72,7 @@ public final class OsrsCapture
 	private final Recorder recorder;
 	private final MccrSession session;
 	private final int radius;
+	private int[][] ring;
 	private final EmbertideConfig config;
 	private List<Actor> crowdActors = java.util.Collections.emptyList();
 	private final Set<Actor> presentActors = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
@@ -80,7 +82,7 @@ public final class OsrsCapture
 	private boolean instance;
 	private int segment;
 	private final Set<String> leftIds = new HashSet<>();
-	private final Map<Long, String> known = new HashMap<>();
+	private final LongMap<String> known = new LongMap<>();
 	// Per baselined tile, the sorted signatures of the objects written for it; absent means empty.
 	private final Map<Long, long[]> sceneObjects = new HashMap<>();
 	private final Set<String> actors = new HashSet<>();
@@ -104,6 +106,7 @@ public final class OsrsCapture
 	/** Projectiles already written: RuneLite reports each one on every frame it moves. */
 	private final Map<Projectile, Boolean> projectilesSeen = new java.util.WeakHashMap<>();
 	private final Map<GraphicsObject, Integer> sceneGraphics = new java.util.IdentityHashMap<>();
+	private final Map<GraphicsObject, Boolean> drawnGraphics = new java.util.IdentityHashMap<>();
 	private final Map<String, long[]> lastMotion = new HashMap<>();
 	private boolean cellLimit;
 	private boolean sceneTruncated;
@@ -160,6 +163,11 @@ public final class OsrsCapture
 		return session.dimension;
 	}
 
+	MccrSession session()
+	{
+		return session;
+	}
+
 
 	private final Map<Skill, Integer> levels = new EnumMap<>(Skill.class);
 	/** Throttled per NPC name. */
@@ -181,6 +189,13 @@ public final class OsrsCapture
 	private static final int MAX_MOMENTS = 2000;
 	private int[] lastCamera;
 	private int[] lastVitals;
+	private int[] lastAudio;
+	/** Per actor, the head icons last written: prayer, skull, then archive and sprite pairs. */
+	private final Map<String, int[]> headIcons = new HashMap<>();
+	private int headIconCount;
+	private int[] lastBossHp;
+	private String lastBossActor;
+	private int bossHpCount;
 	private int cameraCount;
 	// Camera rows land on every change, roughly ten a second while turning.
 	private static final int MAX_CAMERA = 4_000_000;
@@ -640,10 +655,38 @@ public final class OsrsCapture
 		if (actor == null || me == null) { return false; }
 		if (actor == me) { return true; }
 		WorldView view = client.getTopLevelWorldView();
-		return view != null && me.getWorldLocation() != null
+		WorldPoint at = me.getWorldLocation();
+		return view != null && at != null
 			&& ((actor instanceof NPC && config.trackNpcs())
 				|| (actor instanceof Player && config.trackPlayers() && actor.getName() != null))
-			&& drawn(view, me.getWorldLocation(), actor);
+			&& drawn(view, at, actor);
+	}
+
+	/** The kind half of {@link #eligible(Actor, Player)}, with the settings read once for a pass over the actors. */
+	private static boolean tracked(Actor actor, boolean npcs, boolean players)
+	{
+		return (actor instanceof NPC && npcs) || (actor instanceof Player && players && actor.getName() != null);
+	}
+
+	/** The loaded scene and the player's plane, read once for a pass over the actors. */
+	private static final class Bounds
+	{
+		final int baseX, baseY, sizeX, sizeY, plane;
+
+		Bounds(WorldView view, WorldPoint at)
+		{
+			baseX = view.getBaseX();
+			baseY = view.getBaseY();
+			sizeX = view.getSizeX();
+			sizeY = view.getSizeY();
+			plane = at.getPlane();
+		}
+
+		/** As {@link #drawn}. */
+		boolean holds(WorldPoint here)
+		{
+			return here != null && SceneMapper.inScene(baseX, baseY, sizeX, sizeY, plane, here.getX(), here.getY(), here.getPlane());
+		}
 	}
 
 	/** Event actors must have a presence and initial pose before they are referenced. */
@@ -939,7 +982,17 @@ public final class OsrsCapture
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
 			+ "osrs.projectile {graphic, source, target, from, to, start_in, end_in, start_height, end_height, slope, start_pos} once per projectile, times in seconds after the row; "
-			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound");
+			+ "osrs.sound {sound, delay, source, at, range} for every sound effect the client played, at [x, y, plane] with range for an area sound; "
+			+ "osrs.audio {master, sounds, area_sounds} at the start and on any change, the game's volumes from 0 to 100: "
+			+ "the client plays no sound effect while round(127 x sounds/100 x master/100) is 0 and no area sound while the same with area_sounds is 0, "
+			+ "so a volume of 0, or two whose product is under 40, leaves no osrs.sound row; "
+			+ "osrs.head_icons {icons [[actor, prayer, skull, archive, sprite, ...]]} for the actors whose head icons changed that tick, "
+			+ "each entry the actor's whole set until its next entry, scene changes included, and none at the start of a part: "
+			+ "prayer is the frame of sprite 440 (headicons_prayer, 0 to 14) and skull the frame of sprite 439 (headicons_pk), -1 for none, players only; "
+			+ "an NPC's head icons follow as sprite archive and frame pairs; "
+			+ "osrs.boss_hp {shown, npc_id, hp, max, boss, markers, actor} on any change from the first tick the client's HP bar at the top of the screen is shown or its max is above 0: "
+			+ "npc_id the NPC type it is for or -1, boss true for the boss layout, markers its four marker lines (lower threshold, upper threshold, then two more) "
+			+ "each at hp = value - 1 and 0 for none, actor the recorded actor when it is the player's target or the only NPC of that type in the picture");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
@@ -984,37 +1037,34 @@ public final class OsrsCapture
 			stop("camera limit", true);
 			return;
 		}
-		int[] now = {
-			client.getCameraX(),
-			client.getCameraY(),
-			client.getCameraZ(),
-			client.getCameraYaw(),
-			client.getCameraPitch(),
-			client.getScale(),
-			client.getViewportWidth(), client.getViewportHeight(), view.getBaseX(), view.getBaseY(),
-		};
-		if (now[5] <= 0 || (now[0] == 0 && now[1] == 0 && now[2] == 0))
+		int x = client.getCameraX(), y = client.getCameraY(), z = client.getCameraZ();
+		int yaw = client.getCameraYaw(), pitch = client.getCameraPitch(), scale = client.getScale();
+		int width = client.getViewportWidth(), height = client.getViewportHeight();
+		int baseX = view.getBaseX(), baseY = view.getBaseY();
+		if (scale <= 0 || (x == 0 && y == 0 && z == 0))
 		{
 			return;
 		}
-		if (lastCamera != null && Arrays.equals(lastCamera, now))
+		int[] last = lastCamera;
+		if (last != null && last[0] == x && last[1] == y && last[2] == z && last[3] == yaw && last[4] == pitch
+			&& last[5] == scale && last[6] == width && last[7] == height && last[8] == baseX && last[9] == baseY)
 		{
 			return;
 		}
-		lastCamera = now;
-		JsonArray sample = new JsonArray();
+		lastCamera = new int[]{x, y, z, yaw, pitch, scale, width, height, baseX, baseY};
+		JsonArray sample = new JsonArray(8);
 		double tile = SceneMapper.LOCAL_TILE_SIZE;
 		// Client camera Y is northward position; Z is height.
 		// Convert yaw/pitch from 16384 to 2048 units per turn for the recording format.
-		sample.add(Math.round((view.getBaseX() + now[0] / tile) * 1000.0) / 1000.0);
-		sample.add(Math.round((view.getBaseY() + now[1] / tile) * 1000.0) / 1000.0);
+		sample.add(Math.round((baseX + x / tile) * 1000.0) / 1000.0);
+		sample.add(Math.round((baseY + y / tile) * 1000.0) / 1000.0);
 		// Convert downward-positive client height to upward-positive replay height.
-		sample.add(-now[2]);
-		sample.add(Math.round((now[3] / 8.0) * 1000.0) / 1000.0);
-		sample.add(Math.round((now[4] / 8.0) * 1000.0) / 1000.0);
-		sample.add(now[5]);
-		sample.add(client.getViewportWidth());
-		sample.add(client.getViewportHeight());
+		sample.add(-z);
+		sample.add(Math.round((yaw / 8.0) * 1000.0) / 1000.0);
+		sample.add(Math.round((pitch / 8.0) * 1000.0) / 1000.0);
+		sample.add(scale);
+		sample.add(width);
+		sample.add(height);
 		JsonObject payload = new JsonObject();
 		payload.addProperty("dimension", session.dimension);
 		payload.add("camera", sample);
@@ -1079,6 +1129,7 @@ public final class OsrsCapture
 		int[] scene = null;
 		if (rediscover) { seedActors(view); }
 		vitals(t);
+		audio(t);
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
@@ -1111,6 +1162,7 @@ public final class OsrsCapture
 		}
 		appearance(me, PLAYER, t);
 		pose(view, me, PLAYER, at, t, true, -1);
+		JsonArray icons = headIcon(null, me, PLAYER);
 		JsonArray crowd = new JsonArray();
 		int npcsSeen = 0;
 		int playersSeen = 0;
@@ -1118,24 +1170,28 @@ public final class OsrsCapture
 		for (Actor other : crowdActors)
 		{
 			String id = idOf(other);
+			// announce reads the name only for a first presence.
+			boolean seen = actors.contains(id);
 			if (other instanceof NPC)
 			{
 				NPC npc = (NPC) other;
-				String name = SceneMapper.objectMaterial(npc.getName());
-				if (announce(id, name == null ? "NPC" : npc.getName(), NPC_COLOR, "npc", npc.getId(), shownNpcId(npc), npc.getCombatLevel(), t))
+				String name = seen ? null : SceneMapper.objectMaterial(npc.getName()) == null ? "NPC" : npc.getName();
+				if (announce(id, name, NPC_COLOR, "npc", npc.getId(), shownNpcId(npc), npc.getCombatLevel(), t))
 				{
 					npcVariant(npc, id, t);
-					crowdPose(crowd, view, npc, id, npc.getWorldLocation(), npc.getId());
+					crowdPose(crowd, view, me, npc, id, npc.getWorldLocation(), npc.getId());
+					icons = headIcon(icons, npc, id);
 					npcsSeen++;
 				}
 			}
 			else
 			{
 				Player player = (Player) other;
-				if (announce(id, pseudonym(player.getName()), OTHER_PLAYER_COLOR, "player", -1, -1, -1, t))
+				if (announce(id, seen ? null : pseudonym(player.getName()), OTHER_PLAYER_COLOR, "player", -1, -1, -1, t))
 				{
 					appearance(player, id, t);
-					crowdPose(crowd, view, player, id, player.getWorldLocation(), -1);
+					crowdPose(crowd, view, me, player, id, player.getWorldLocation(), -1);
+					icons = headIcon(icons, player, id);
 					playersSeen++;
 				}
 			}
@@ -1155,13 +1211,22 @@ public final class OsrsCapture
 				poseCount += crowd.size();
 			}
 		}
+		if (icons != null && recording && headIconCount < MAX_HITS)
+		{
+			JsonObject payload = new JsonObject();
+			payload.addProperty("dimension", session.dimension);
+			payload.add("icons", icons);
+			if (emit("osrs.head_icons", t, payload, PLAYER, false)) { headIconCount += icons.size(); }
+		}
+		if (recording) { bossHp(me, t); }
 		if (rediscover && recording && scene != null)
 		{
 			emit("osrs.scene_loaded", t, sceneLoaded(client.getTickCount(), view.getBaseX(), view.getBaseY(), at,
 				known.size() - cellsBefore, scene, npcsSeen, playersSeen), PLAYER, false);
 		}
-		statusLine = String.format(Locale.ROOT, "Recording %d:%02d · %d cells · %d objects%s", (int) t / 60, (int) t % 60, known.size(), objectCount,
-			cellLimit || sceneTruncated ? " · area captured" : "");
+		int seconds = (int) t % 60;
+		statusLine = "Recording " + (int) t / 60 + (seconds < 10 ? ":0" : ":") + seconds + " · " + known.size() + " cells · " + objectCount + " objects"
+			+ (cellLimit || sceneTruncated ? " · area captured" : "");
 		return true;
 	}
 
@@ -1184,14 +1249,18 @@ public final class OsrsCapture
 			return;
 		}
 		WorldPoint at = me.getWorldLocation();
+		Bounds bounds = new Bounds(view, at);
 		JsonArray samples = new JsonArray();
-		motionSample(samples, me, PLAYER, view);
+		motionSample(samples, me, PLAYER, at, bounds);
+		boolean npcs = !crowdActors.isEmpty() && config.trackNpcs(), players = !crowdActors.isEmpty() && config.trackPlayers();
 		for (Actor other : crowdActors)
 		{
 			String id = idOf(other);
-			if (presentActors.contains(other) && eligible(other, me) && actors.contains(id))
+			if (!presentActors.contains(other) || !actors.contains(id)) { continue; }
+			WorldPoint here = other.getWorldLocation();
+			if (other == me || (tracked(other, npcs, players) && bounds.holds(here)))
 			{
-				motionSample(samples, other, id, view);
+				motionSample(samples, other, id, here, bounds);
 			}
 		}
 		sceneEffects(view, at.getPlane());
@@ -1229,16 +1298,18 @@ public final class OsrsCapture
 			skyColor = color;
 			environmentCount++;
 		}
+		net.runelite.api.Deque<GraphicsObject> graphics = view.getGraphicsObjects();
+		int cycle = client.getGameCycle();
+		if (sameGraphics(graphics, plane, cycle)) { return; }
 		Map<GraphicsObject, Integer> visible = new java.util.IdentityHashMap<>();
 		JsonArray started = new JsonArray(), ended = new JsonArray();
-		net.runelite.api.Deque<GraphicsObject> graphics = view.getGraphicsObjects();
 		int scanned = 0;
 		if (graphics != null) for (GraphicsObject graphic : graphics)
 		{
 			if (++scanned > 4096) { stop("scene effect limit", true); return; }
 			LocalPoint local = graphic.getLocation();
 			if (graphic.finished() || graphic.getLevel() != plane || local == null
-				|| graphic.getStartCycle() > client.getGameCycle()) { continue; }
+				|| graphic.getStartCycle() > cycle) { continue; }
 			Integer key = sceneGraphics.get(graphic);
 			if (key == null)
 			{
@@ -1272,14 +1343,31 @@ public final class OsrsCapture
 		}
 	}
 
-	private void motionSample(JsonArray samples, Actor actor, String id, WorldView view)
+	/** True when the spot animations drawn are exactly the ones already written, so none starts or ends. */
+	private boolean sameGraphics(net.runelite.api.Deque<GraphicsObject> graphics, int plane, int cycle)
+	{
+		drawnGraphics.clear();
+		int scanned = 0;
+		if (graphics != null) for (GraphicsObject graphic : graphics)
+		{
+			if (++scanned > 4096) { return false; }
+			if (graphic.finished() || graphic.getLevel() != plane || graphic.getLocation() == null
+				|| graphic.getStartCycle() > cycle) { continue; }
+			if (!sceneGraphics.containsKey(graphic)) { return false; }
+			drawnGraphics.put(graphic, Boolean.TRUE);
+		}
+		return drawnGraphics.size() == sceneGraphics.size();
+	}
+
+	/** The actor's visible state when it changed; world is its tile, read this cycle. */
+	private void motionSample(JsonArray samples, Actor actor, String id, WorldPoint world, Bounds bounds)
 	{
 		LocalPoint local = actor.getLocalLocation();
-		WorldPoint world = actor.getWorldLocation();
 		if (local == null || world == null)
 		{
 			return;
 		}
+		int baseX = bounds.baseX, baseY = bounds.baseY;
 		int x = local.getX(), y = local.getY(), plane = world.getPlane();
 		int orientation = actor.getCurrentOrientation(), animation = actor.getAnimation();
 		int frame = actor.getAnimationFrame(), poseAnimation = actor.getPoseAnimation();
@@ -1288,21 +1376,24 @@ public final class OsrsCapture
 		// Record frame rewinds to preserve animation restarts.
 		if (previous != null && previous[0] == x && previous[1] == y && previous[2] == plane
 			&& previous[3] == orientation && previous[4] == animation && previous[6] == poseAnimation && frame >= previous[5]
-			&& previous[7] == view.getBaseX() && previous[8] == view.getBaseY())
+			&& previous[7] == baseX && previous[8] == baseY)
 		{
 			previous[5] = frame;
 			return;
 		}
-		lastMotion.put(id, new long[]{x, y, plane, orientation, animation, frame, poseAnimation, view.getBaseX(), view.getBaseY()});
-		JsonArray sample = new JsonArray();
+		long[] now = previous != null ? previous : new long[9];
+		now[0] = x; now[1] = y; now[2] = plane; now[3] = orientation; now[4] = animation;
+		now[5] = frame; now[6] = poseAnimation; now[7] = baseX; now[8] = baseY;
+		if (previous == null) { lastMotion.put(id, now); }
+		JsonArray sample = new JsonArray(8);
 		sample.add(id);
-		sample.add(Math.round((view.getBaseX() + local.getX() / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0) / 1000.0);
-		sample.add(Math.round((view.getBaseY() + local.getY() / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0) / 1000.0);
-		sample.add(world.getPlane());
-		sample.add(actor.getCurrentOrientation());
-		sample.add(actor.getAnimation());
-		sample.add(actor.getAnimationFrame());
-		sample.add(actor.getPoseAnimation());
+		sample.add(Math.round((baseX + x / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0) / 1000.0);
+		sample.add(Math.round((baseY + y / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0) / 1000.0);
+		sample.add(plane);
+		sample.add(orientation);
+		sample.add(animation);
+		sample.add(frame);
+		sample.add(poseAnimation);
 		samples.add(sample);
 	}
 
@@ -1379,12 +1470,22 @@ public final class OsrsCapture
 
 	private List<Actor> inThePicture(WorldView view, Player me, WorldPoint at)
 	{
-		List<Actor> found = new ArrayList<>();
+		boolean npcs = config.trackNpcs(), players = config.trackPlayers();
+		Bounds bounds = new Bounds(view, at);
+		List<Actor> candidates = new ArrayList<>();
+		// Distance in the high half, arrival in the low: the sort is stable, nearest first.
+		long[] order = new long[presentActors.size()];
 		for (Actor actor : presentActors)
 		{
-			if (actor != me && eligible(actor, me)) { found.add(actor); }
+			if (actor == me || !tracked(actor, npcs, players)) { continue; }
+			WorldPoint here = actor.getWorldLocation();
+			if (!bounds.holds(here)) { continue; }
+			order[candidates.size()] = (long) at.distanceTo(here) << 32 | candidates.size();
+			candidates.add(actor);
 		}
-		found.sort(java.util.Comparator.comparingInt(actor -> at.distanceTo(actor.getWorldLocation())));
+		Arrays.sort(order, 0, candidates.size());
+		List<Actor> found = new ArrayList<>(candidates.size());
+		for (int i = 0; i < candidates.size(); i++) { found.add(candidates.get((int) order[i])); }
 		return found.size() > TRACKED_PER_TICK ? found.subList(0, TRACKED_PER_TICK) : found;
 	}
 
@@ -1608,6 +1709,166 @@ public final class OsrsCapture
 		emit("osrs.vitals", t, payload, PLAYER, false);
 	}
 
+	/** The game's volumes, 0 to 100, on change; the client neither plays nor reports a sound its volumes round to silence. */
+	private void audio(double t)
+	{
+		net.runelite.api.Preferences preferences = client.getPreferences();
+		if (preferences == null) { return; }
+		int[] now = {
+			// The slider and mute button set this varp; OPTION_MASTER_VOLUME_DESKTOP is a saved copy the client never reads.
+			client.getVarpValue(VarPlayerID.OPTION_MASTER_VOLUME),
+			preferences.getSoundEffectVolume(),
+			preferences.getAreaSoundEffectVolume(),
+		};
+		if (lastAudio != null && Arrays.equals(lastAudio, now))
+		{
+			return;
+		}
+		lastAudio = now;
+		JsonObject payload = new JsonObject();
+		payload.addProperty("master", now[0]);
+		payload.addProperty("sounds", now[1]);
+		payload.addProperty("area_sounds", now[2]);
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.audio", t, payload, PLAYER, false);
+	}
+
+	/** Adds [id, prayer, skull, archive and sprite pairs] to changed, made on first use, when they differ from the last written. */
+	private JsonArray headIcon(JsonArray changed, Actor actor, String id)
+	{
+		int prayer = -1, skull = -1, pairs = 0;
+		int[] archives = null;
+		short[] sprites = null;
+		if (actor instanceof Player)
+		{
+			prayer = prayerFrame(((Player) actor).getOverheadIcon());
+			skull = Math.max(-1, ((Player) actor).getSkullIcon());
+		}
+		else if (actor instanceof NPC)
+		{
+			archives = ((NPC) actor).getOverheadArchiveIds();
+			sprites = archives == null ? null : ((NPC) actor).getOverheadSpriteIds();
+			for (int i = 0; sprites != null && i < Math.min(archives.length, sprites.length); i++)
+			{
+				if (archives[i] >= 0 && sprites[i] >= 0) { pairs++; }
+			}
+		}
+		int[] last = headIcons.get(id);
+		if (last == null ? prayer < 0 && skull < 0 && pairs == 0 : sameIcons(last, prayer, skull, archives, sprites, pairs))
+		{
+			return changed;
+		}
+		int[] now = new int[2 + 2 * pairs];
+		now[0] = prayer;
+		now[1] = skull;
+		for (int i = 0, at = 2; at < now.length; i++)
+		{
+			if (archives[i] >= 0 && sprites[i] >= 0)
+			{
+				now[at++] = archives[i];
+				now[at++] = sprites[i];
+			}
+		}
+		headIcons.put(id, now);
+		JsonArray entry = new JsonArray(now.length + 1);
+		entry.add(id);
+		for (int value : now) { entry.add(value); }
+		if (changed == null) { changed = new JsonArray(); }
+		changed.add(entry);
+		return changed;
+	}
+
+	private static boolean sameIcons(int[] last, int prayer, int skull, int[] archives, short[] sprites, int pairs)
+	{
+		if (last[0] != prayer || last[1] != skull || last.length != 2 + 2 * pairs) { return false; }
+		for (int i = 0, at = 2; at < last.length; i++)
+		{
+			if (archives[i] < 0 || sprites[i] < 0) { continue; }
+			if (last[at++] != archives[i] || last[at++] != sprites[i]) { return false; }
+		}
+		return true;
+	}
+
+	/** The frame of sprite 440 the client draws for icon, -1 for none; by name, so a reordered enum cannot shift it. */
+	static int prayerFrame(HeadIcon icon)
+	{
+		if (icon == null) { return -1; }
+		switch (icon)
+		{
+			case MELEE: return 0;
+			case RANGED: return 1;
+			case MAGIC: return 2;
+			case RETRIBUTION: return 3;
+			case SMITE: return 4;
+			case REDEMPTION: return 5;
+			case RANGE_MAGE: return 6;
+			case RANGE_MELEE: return 7;
+			case MAGE_MELEE: return 8;
+			case RANGE_MAGE_MELEE: return 9;
+			case WRATH: return 10;
+			case SOUL_SPLIT: return 11;
+			case DEFLECT_MELEE: return 12;
+			case DEFLECT_RANGE: return 13;
+			case DEFLECT_MAGE: return 14;
+			default: return -1;
+		}
+	}
+
+	/** The client's HP bar at the top of the screen, on change from the first tick it is shown or its max is above 0. */
+	private void bossHp(Player me, double t)
+	{
+		net.runelite.api.widgets.Widget bar = client.getWidget(net.runelite.api.gameval.InterfaceID.HpbarHud.HP);
+		int[] now = {
+			bar != null && !bar.isHidden() ? 1 : 0,
+			client.getVarpValue(VarPlayerID.HPBAR_HUD_NPC),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_BASEHP),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_BOSS),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_LOWER_THRESHOLD),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_UPPER_THRESHOLD),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP_1),
+			client.getVarbitValue(VarbitID.HPBAR_HUD_HP_2),
+		};
+		if (lastBossHp == null && now[0] == 0 && now[3] <= 0) { return; }
+		String actor = now[0] == 1 && now[1] >= 0 ? bossActor(me, now[1]) : null;
+		if (lastBossHp != null && Arrays.equals(lastBossHp, now) && java.util.Objects.equals(actor, lastBossActor)) { return; }
+		if (bossHpCount >= MAX_EVENTS) { return; }
+		lastBossHp = now;
+		lastBossActor = actor;
+		JsonObject payload = new JsonObject();
+		payload.addProperty("shown", now[0] == 1);
+		payload.addProperty("npc_id", now[1]);
+		payload.addProperty("hp", now[2]);
+		payload.addProperty("max", now[3]);
+		payload.addProperty("boss", now[4] == 1);
+		JsonArray markers = new JsonArray(4);
+		for (int i = 5; i < 9; i++) { markers.add(now[i]); }
+		payload.add("markers", markers);
+		if (actor != null) { payload.addProperty("actor", actor); }
+		payload.addProperty("dimension", session.dimension);
+		if (emit("osrs.boss_hp", t, payload, actor == null ? PLAYER : actor, false)) { bossHpCount++; }
+	}
+
+	/** The recorded actor a bar is for: the player's target when it is that NPC, else the only such NPC in the picture. */
+	private String bossActor(Player me, int npcId)
+	{
+		Actor target = me.getInteracting();
+		String id = target instanceof NPC && isNpc((NPC) target, npcId) ? actorIds.get(target) : null;
+		if (id != null) { return actors.contains(id) ? id : null; }
+		for (Actor actor : crowdActors)
+		{
+			if (!(actor instanceof NPC) || !isNpc((NPC) actor, npcId)) { continue; }
+			if (id != null) { return null; }
+			id = actorIds.get(actor);
+		}
+		return id != null && actors.contains(id) ? id : null;
+	}
+
+	private static boolean isNpc(NPC npc, int npcId)
+	{
+		return npc.getId() == npcId || shownNpcId(npc) == npcId;
+	}
+
 	// -1 while hidden
 	private static int shownNpcId(NPC npc)
 	{
@@ -1631,11 +1892,11 @@ public final class OsrsCapture
 
 	/** osrs.poses entry: [id, x, y, plane, height, orientation, animation, pose animation, frame, graphic,
 	 * npc id, graphic height, client slot, logical height, health ratio, health scale, interacting]. Append only. */
-	private void crowdPose(JsonArray crowd, WorldView view, Actor actor, String id, WorldPoint at, int npcId)
+	private void crowdPose(JsonArray crowd, WorldView view, Player me, Actor actor, String id, WorldPoint at, int npcId)
 	{
 		int height = tileHeight(view, at);
 		int[] ground = SceneMapper.groundCell(at.getX(), at.getY(), at.getPlane(), height);
-		JsonArray entry = new JsonArray();
+		JsonArray entry = new JsonArray(17);
 		entry.add(id);
 		entry.add(at.getX());
 		entry.add(at.getY());
@@ -1653,7 +1914,7 @@ public final class OsrsCapture
 		entry.add(actor.getLogicalHeight());
 		entry.add(actor.getHealthRatio());
 		entry.add(actor.getHealthScale());
-		entry.add(interactingId(actor, client.getLocalPlayer()));
+		entry.add(interactingId(actor, me));
 		crowd.add(entry);
 	}
 
@@ -1684,44 +1945,55 @@ public final class OsrsCapture
 		short[][][] underlays = scene.getUnderlayIds();
 		int[][][] heights = view.getTileHeights();
 		int plane = at.getPlane();
-		List<int[]> ring = new ArrayList<>();
-		for (int dx = -radius; dx <= radius; dx++)
-		{
-			for (int dy = -radius; dy <= radius; dy++)
-			{
-				if (dx * dx + dy * dy <= radius * radius) { ring.add(new int[]{dx, dy, dx * dx + dy * dy}); }
-			}
-		}
-		ring.sort((a, b) -> Integer.compare(a[2], b[2]));
+		int atX = at.getX(), atY = at.getY(), baseX = view.getBaseX(), baseY = view.getBaseY();
 		List<int[]> cells = new ArrayList<>();
 		List<String> materials = new ArrayList<>();
-		for (int[] step : ring)
+		for (int[] step : ring())
 		{
-			int worldX = at.getX() + step[0], worldY = at.getY() + step[1];
-			int sx = worldX - view.getBaseX(), sy = worldY - view.getBaseY();
+			int worldX = atX + step[0], worldY = atY + step[1];
+			int sx = worldX - baseX, sy = worldY - baseY;
 			if (plane < 0 || plane >= tiles.length || sx < 0 || sy < 0 || sx >= tiles[plane].length || sy >= tiles[plane][sx].length)
 			{
 				continue;
 			}
 			int height = heights != null && plane < heights.length && sx < heights[plane].length && sy < heights[plane][sx].length
 				? heights[plane][sx][sy] : 0;
-			int[] ground = SceneMapper.groundCell(worldX, worldY, plane, height);
-			if (!known.containsKey(SceneMapper.key(ground)))
+			// The ground cell and the cell above it, as SceneMapper.groundCell and objectCell.
+			int y = SceneMapper.y(plane, height);
+			if (!known.containsKey(SceneMapper.key(worldX, y, -worldY)))
 			{
 				short overlay = overlays != null && plane < overlays.length && sx < overlays[plane].length && sy < overlays[plane][sx].length
 					? overlays[plane][sx][sy] : 0;
 				short underlay = underlays != null && plane < underlays.length && sx < underlays[plane].length && sy < underlays[plane][sx].length
 					? underlays[plane][sx][sy] : 0;
-				if (!offer(cells, materials, ground, SceneMapper.groundMaterial(overlay, underlay), t)) { return; }
+				if (!offer(cells, materials, new int[]{worldX, y, -worldY}, SceneMapper.groundMaterial(overlay, underlay), t)) { return; }
 			}
-			int[] above = SceneMapper.objectCell(worldX, worldY, plane, height);
-			if (!known.containsKey(SceneMapper.key(above)))
+			if (!known.containsKey(SceneMapper.key(worldX, y + 1, -worldY)))
 			{
 				Tile tile = tiles[plane][sx][sy];
-				if (!offer(cells, materials, above, tile == null ? SceneMapper.AIR : topMaterial(tile, 0L), t)) { return; }
+				if (!offer(cells, materials, new int[]{worldX, y + 1, -worldY}, tile == null ? SceneMapper.AIR : topMaterial(tile, 0L), t)) { return; }
 			}
 		}
 		snapshot(cells, materials, t);
+	}
+
+	/** Offsets within the radius, nearest first. */
+	private int[][] ring()
+	{
+		if (ring == null)
+		{
+			List<int[]> steps = new ArrayList<>();
+			for (int dx = -radius; dx <= radius; dx++)
+			{
+				for (int dy = -radius; dy <= radius; dy++)
+				{
+					if (dx * dx + dy * dy <= radius * radius) { steps.add(new int[]{dx, dy, dx * dx + dy * dy}); }
+				}
+			}
+			steps.sort((a, b) -> Integer.compare(a[2], b[2]));
+			ring = steps.toArray(new int[0][]);
+		}
+		return ring;
 	}
 
 	/** One object found on a tile, with what identifies it across scene loads. */

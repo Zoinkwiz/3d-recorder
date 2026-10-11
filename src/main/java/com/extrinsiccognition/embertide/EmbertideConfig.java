@@ -101,6 +101,19 @@ public interface EmbertideConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "liveToApp",
+		name = "Show live in Embertide",
+		description = "Send this session to the Embertide app on this computer as you play, so it can be drawn while you are still in it. Your recording is still saved to a file exactly as it is now, and nothing leaves this computer. Off unless you turn it on.",
+		// Own warning text: the Hub default would name an internet server.
+		warning = "Sends this session's rows to the Embertide app on this computer over a local connection while you play. Nothing is sent anywhere else by the plugin.",
+		position = 8
+	)
+	default boolean liveToApp()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
 		description = "Open Studio in your browser when you log out, ready for you to drag your recording in.",

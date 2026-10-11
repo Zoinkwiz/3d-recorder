@@ -37,7 +37,10 @@ recording.
 ## What is recorded
 
 - Where you and the NPCs and players around you move, what they look like
-  and what they do: animations, hits and deaths.
+  and what they do: animations, projectiles, hits and deaths.
+- The prayer and skull icons over heads, and the health bar the game shows
+  at the top of the screen.
+- The sound effects the game plays, and your game volume settings.
 - The scenery and ground items in the area the game has loaded, and when
   they change.
 - The ground around you, for the block view.
@@ -61,10 +64,18 @@ milestones in the plugin's settings.
 
 ## Privacy
 
-The plugin doesn't connect to anything. It writes your recording to a
+Unless you turn on Show live in Embertide, the plugin doesn't connect to
+anything. It writes your recording to a
 `.partial` file in its folder as you play, and renames the file when each
 part is saved. Your recordings stay on your computer unless you choose to
 share them.
+
+If you turn on Show live in Embertide (off unless you do), the plugin also
+sends the current recording, row by row, to the Embertide app running on this
+same computer, over a local connection that never leaves your machine, and
+keeps that connection open so the app can tell the session is still running.
+What the app does with it is the app's own settings: it draws it, and it
+uploads it only if you have signed in.
 
 Studio runs in your browser and keeps the recording on your computer unless
 you make a share link. You don't need an account.

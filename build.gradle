@@ -40,6 +40,22 @@ tasks.withType(JavaCompile).configureEach {
 	options.release.set(11)
 }
 
+// Smoke test against a running app: ./gradlew smoke -Pendpoint=<endpoint.json>
+tasks.register('smoke', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.extrinsiccognition.embertide.RecorderSmoke'
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+	args findProperty('endpoint') ?: ''
+}
+
+// Client-thread cost of a raid tick at 1, 8 and 30 actors: ./gradlew bench [-Pticks=300]
+tasks.register('bench', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.extrinsiccognition.embertide.RaidTickBench'
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+	args findProperty('ticks') ?: '300'
+}
+
 tasks.register('run', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = pluginMainClass
