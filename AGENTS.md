@@ -13,12 +13,8 @@ before changing behaviour; it is the Plugin Hub's description of the plugin.
 - Versions: bump `build.gradle`, `runelite-plugin.properties` and
   `MccrSession.VERSION` together, in a commit of their own ("Bump version to
   X"); `RecorderVersionTest` checks they agree.
-- No new runtime dependencies. Recordings are written and read only through
-  `Filepath`. The only network is the opt-in live link (Show live in
-  Embertide, off by default): `LiveMirror` copies rows to the Embertide app on
-  loopback through the injected `OkHttpClient`, and `RecorderEndpoint` reads
-  the app's `endpoint.json` from the app's own folder. Both are Plugin Hub
-  review items; keep them behind that setting.
+- No new runtime dependencies and no network. Recordings are written and
+  read only through `Filepath`; the plugin reads no other files.
 - One format, one reader: row type names are in `RowTypes`, the header in
   `MccrSession` and `MccrFileRecorder.MOTION_XY`, the ground layout in
   `GroundRows` (writer and decoder side by side). Change a row and its reader
@@ -70,5 +66,6 @@ local recordings open and seek; animation clocks match 9,006 native frames;
 projection in a real house, Hide surroundings under 117 HD, the floor of
 older recordings, frame rate at the display limits (128 actors, 4,096
 objects, radius 48). RuneLite lists content simulation among rejected
-features, so the viewer needs a Plugin Hub ruling before it ships:
-<https://github.com/runelite/runelite/wiki/Rejected-or-Rolled-Back-Features>.
+features (<https://github.com/runelite/runelite/wiki/Rejected-or-Rolled-Back-Features>).
+That rule was made for a playable boss tester; the viewer replays a recording
+and cannot be played, so it ships (Tom's ruling, 2026-10-11).
