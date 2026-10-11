@@ -40,7 +40,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "trackPlayers",
 		name = "Record other players",
-		description = "Record other players as unnamed figures: where they go, what they wear and their fights. Their names and chat are never read.",
+		description = "Record other players as unnamed figures: where they go, what they wear and their fights. Their names are read only to tell them apart and are never saved.",
 		position = 3
 	)
 	default boolean trackPlayers()
@@ -62,7 +62,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOwnChat",
 		name = "Record your public chat",
-		description = "Record your own public chat. Private, clan and friends chat, and other players' chat, are never read.",
+		description = "Record your own public chat. The sender of each public message is checked to find yours; other players' chat is never saved, and private, clan and friends chat are never read.",
 		position = 5
 	)
 	default boolean recordOwnChat()
