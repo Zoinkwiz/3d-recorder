@@ -239,17 +239,11 @@ final class RaidScene
 		return capture;
 	}
 
-	/** The recorders a streamer runs: the file, mirrored live to an app that has not answered yet, so rows queue. */
-	static LiveMirror streamerRecorder(com.google.gson.Gson gson, net.runelite.client.util.Filepath folder, java.util.concurrent.Executor fileWorker)
+	/** The file recorder a capture of this scene writes to. */
+	static MccrFileRecorder fileRecorder(com.google.gson.Gson gson, net.runelite.client.util.Filepath folder, java.util.concurrent.Executor fileWorker)
 	{
-		java.util.concurrent.ScheduledExecutorService idle = (java.util.concurrent.ScheduledExecutorService) Proxy.newProxyInstance(
-			RaidScene.class.getClassLoader(), new Class<?>[]{java.util.concurrent.ScheduledExecutorService.class},
-			(proxy, method, args) -> method.getReturnType() == boolean.class ? false : null);
-		MccrRecorderClient live = new MccrRecorderClient(HTTP, gson, idle, new RecorderEndpoint("http://127.0.0.1:9", "bench", 0));
-		return new LiveMirror(new MccrFileRecorder(gson, folder, () -> "osrs-raid", fileWorker), live);
+		return new MccrFileRecorder(gson, folder, () -> "osrs-raid", fileWorker);
 	}
-
-	private static final okhttp3.OkHttpClient HTTP = new okhttp3.OkHttpClient();
 
 	Player me()
 	{

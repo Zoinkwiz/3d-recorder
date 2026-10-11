@@ -48,8 +48,8 @@ public class RaidRowsTest
 	public void aRaidWritesTheSameRows() throws Exception
 	{
 		List<Runnable> fileWork = new ArrayList<>();
-		LiveMirror mirror = RaidScene.streamerRecorder(GSON, Filepath.Unchecked.getRooted(dir), fileWork::add);
-		Kept kept = new Kept(mirror);
+		MccrFileRecorder recorder = RaidScene.fileRecorder(GSON, Filepath.Unchecked.getRooted(dir), fileWork::add);
+		Kept kept = new Kept(recorder);
 		RaidScene scene = new RaidScene(30, 11);
 		OsrsCapture capture = scene.capture(kept);
 		capture.start();
@@ -75,9 +75,8 @@ public class RaidRowsTest
 		List<String> after = new ArrayList<>();
 		for (JsonObject row : kept.rows) { after.add(GSON.toJson(row)); }
 		assertEquals(kept.json, after);
-		assertEquals(kept.json, mirror.live().queued());
 		String id = capture.id();
-		Path file = Filepath.Unchecked.getPath(((MccrFileRecorder) mirror.file()).path());
+		Path file = Filepath.Unchecked.getPath(recorder.path());
 		List<String> filed = lines(Files.readAllBytes(file));
 		assertEquals(kept.json.size() + 1, filed.size());
 		assertEquals(ROWS, digest(kept.json, id));

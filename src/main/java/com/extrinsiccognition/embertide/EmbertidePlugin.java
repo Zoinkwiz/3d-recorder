@@ -120,8 +120,6 @@ public class EmbertidePlugin extends Plugin
 	private java.util.concurrent.ScheduledExecutorService executor;
 	@Inject
 	private ItemManager itemManager;
-	@Inject
-	private okhttp3.OkHttpClient okHttpClient;
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -589,7 +587,7 @@ public class EmbertidePlugin extends Plugin
 		{
 			if (canRecover())
 			{
-				((MccrFileRecorder) fileOf(pendingSave.recorder())).discard();
+				((MccrFileRecorder) pendingSave.recorder()).discard();
 				pendingSave = null;
 				save = CompletableFuture.completedFuture(null);
 				notice = "Unsaved recording discarded.";
@@ -655,18 +653,9 @@ public class EmbertidePlugin extends Plugin
 		{
 			text.append("\n\nOther players are recorded as unnamed figures.");
 		}
-		if (recorder instanceof LiveMirror)
-		{
-			String live = ((LiveMirror) recorder).liveNote();
-			if (!live.isEmpty())
-			{
-				text.append("\n\n").append(live);
-			}
-		}
 		boolean busy = !current.recording();
-		Recorder writing = fileOf(recorder);
-		String name = writing instanceof MccrFileRecorder && ((MccrFileRecorder) writing).path() != null
-			? ((MccrFileRecorder) writing).path().getFileName().toString()
+		String name = recorder instanceof MccrFileRecorder && ((MccrFileRecorder) recorder).path() != null
+			? ((MccrFileRecorder) recorder).path().getFileName().toString()
 			: "";
 		return new PanelState(text.toString(), name, files, !busy, !busy);
 	}
@@ -716,11 +705,6 @@ public class EmbertidePlugin extends Plugin
 			Player who = client.getLocalPlayer();
 			return fileStem(who == null ? null : who.getName());
 		}, executor);
-		if (config.liveToApp())
-		{
-			// The client finds the app off this thread, and waits for it if it is not open yet.
-			recorder = new LiveMirror(recorder, new MccrRecorderClient(okHttpClient, gson, executor, null));
-		}
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me == null ? null : me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
 		next.account(accountKey());
@@ -794,9 +778,8 @@ public class EmbertidePlugin extends Plugin
 	private void remember(OsrsCapture ended, Throwable throwable)
 	{
 		Recorder recorder = ended.recorder();
-		Recorder writing = fileOf(recorder);
-		String name = writing instanceof MccrFileRecorder && ((MccrFileRecorder) writing).path() != null
-			? ((MccrFileRecorder) writing).path().getFileName().toString()
+		String name = recorder instanceof MccrFileRecorder && ((MccrFileRecorder) recorder).path() != null
+			? ((MccrFileRecorder) recorder).path().getFileName().toString()
 			: "recording " + ended.part();
 		String problem = throwable == null ? "" : rootMessage(throwable);
 		if (throwable == null && recorder.state() == Recorder.State.FAILED)
@@ -804,11 +787,6 @@ public class EmbertidePlugin extends Plugin
 			problem = recorder.error();
 		}
 		saved.add(new SavedFile(name, ended.part(), ended.seconds(), problem));
-	}
-
-	private static Recorder fileOf(Recorder recorder)
-	{
-		return recorder instanceof LiveMirror ? ((LiveMirror) recorder).file() : recorder;
 	}
 
 	private static String rootMessage(Throwable throwable)
