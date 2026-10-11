@@ -14,6 +14,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -89,6 +90,11 @@ final class FakeApp implements AutoCloseable
 	FakeApp publish() throws IOException
 	{
 		Path file = RecorderEndpoint.candidateFiles().get(0);
+		// Never the running app's own file: a test that forgets to move the data home stops here.
+		if (!file.toAbsolutePath().startsWith(Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath()))
+		{
+			throw new IllegalStateException("A test would write the real endpoint.json: " + file);
+		}
 		Files.createDirectories(file.getParent());
 		Path temporary = file.resolveSibling("endpoint.json." + UUID.randomUUID() + ".tmp");
 		Files.write(temporary, ("{\"version\":1,\"url\":\"" + endpoint().getUrl() + "\",\"origin\":\"" + RecorderEndpoint.ORIGIN

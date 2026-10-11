@@ -105,6 +105,7 @@ public class LiveMirrorTest
 		home = System.getProperty("user.home");
 		fakeHome = Files.createTempDirectory("live-mirror-home");
 		System.setProperty("user.home", fakeHome.toString());
+		System.setProperty(RecorderEndpoint.DATA_HOME_PROPERTY, fakeHome.toString());
 	}
 
 	@After
@@ -118,6 +119,7 @@ public class LiveMirrorTest
 		http.dispatcher().executorService().shutdownNow();
 		http.connectionPool().evictAll();
 		System.setProperty("user.home", home);
+		System.clearProperty(RecorderEndpoint.DATA_HOME_PROPERTY);
 		try (Stream<Path> files = Files.walk(fakeHome))
 		{
 			files.sorted((a, b) -> b.compareTo(a)).forEach(path -> path.toFile().delete());

@@ -21,6 +21,12 @@ public class RecorderEndpoint
 	/** Packaged app first, then a dev run. */
 	public static final String[] DATA_DIR_NAMES = {"Embertide", "Playroll"};
 	public static final String RELATIVE_FILE = "place-memory/endpoint.json";
+	/**
+	 * Where the app data folders are looked for instead, when set. Tests set it:
+	 * on Windows the lookup reads LOCALAPPDATA, which a test cannot move, so a
+	 * test that only moved user.home wrote over the real app's endpoint.json.
+	 */
+	public static final String DATA_HOME_PROPERTY = "embertide.dataHome";
 
 	String url;
 	String token;
@@ -32,7 +38,12 @@ public class RecorderEndpoint
 		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
 		String home = System.getProperty("user.home", "");
 		Path base;
-		if (os.contains("win"))
+		String forced = System.getProperty(DATA_HOME_PROPERTY, "");
+		if (!forced.isEmpty())
+		{
+			base = Paths.get(forced);
+		}
+		else if (os.contains("win"))
 		{
 			String local = System.getenv("LOCALAPPDATA");
 			base = local != null && !local.isEmpty() ? Paths.get(local) : Paths.get(home, "AppData", "Local");
