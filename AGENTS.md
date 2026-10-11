@@ -13,8 +13,31 @@ before changing behaviour; it is the Plugin Hub's description of the plugin.
 - Versions: bump `build.gradle`, `runelite-plugin.properties` and
   `MccrSession.VERSION` together, in a commit of their own ("Bump version to
   X"); `RecorderVersionTest` checks they agree.
-- No new runtime dependencies and no network. Recordings are written and
-  read only through `Filepath`; the plugin reads no other files.
+- No new runtime dependencies. Recordings are written and read only through
+  `Filepath`. The only network is the opt-in live link (Show live in
+  Embertide, off by default): `LiveMirror` copies rows to the Embertide app on
+  loopback through the injected `OkHttpClient`, and `RecorderEndpoint` reads
+  the app's `endpoint.json` from the app's own folder. Both are Plugin Hub
+  review items; keep them behind that setting.
+
+## The live link is held for a second release
+
+This branch is `release/0.5` plus the live link. The Hub release ships
+without it; it goes out as a release of its own once these Hub concerns
+are settled:
+
+- The Hub rejects plugins that expose player information over HTTP. The
+  link is loopback only, but it still sends every row, other players
+  included, over a socket.
+- File I/O goes through `Filepath`. `RecorderEndpoint` reads `endpoint.json`
+  from the app's folder (found from `user.home` and `System.getenv`) with
+  `java.nio.file`, outside it.
+- Plugin Hub PR #18141 is the precedent on live combat feeds; read its review
+  before proposing the link.
+
+Which design replaces it (the app tailing the `.partial` file, or an endpoint
+found through `Filepath`) is not decided. Until it is, keep `RecorderEndpoint`
+as it is.
 - One format, one reader: row type names are in `RowTypes`, the header in
   `MccrSession` and `MccrFileRecorder.MOTION_XY`, the ground layout in
   `GroundRows` (writer and decoder side by side). Change a row and its reader

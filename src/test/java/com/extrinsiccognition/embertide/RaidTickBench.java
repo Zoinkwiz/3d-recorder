@@ -13,7 +13,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The plugin's client-thread cost in a raid: each game tick with its 30 client cycles and the projectiles,
- * hitsplats and sounds between them, written to the file.
+ * hitsplats and sounds between them, written to the file and mirrored live as a streamer runs it.
  * {@code ./gradlew bench} prints the table at 1, 8 and 30 actors; the test holds a raid tick to its budget.
  */
 public class RaidTickBench
@@ -103,7 +103,7 @@ public class RaidTickBench
 		overhead = allocated() - overhead;
 		for (int i = 0; i < warmup + ticks; i++)
 		{
-			// The file's worker never runs here, so its rows pile up: start a fresh file before they fill it.
+			// The app has not answered yet, so the live queue fills: start a fresh pair before it does.
 			if (i % 4 == 0) { recorder.swap(capture); }
 			int at = i - warmup;
 			scene.serverTick();
@@ -160,7 +160,7 @@ public class RaidTickBench
 		return sorted[Math.min(sorted.length - 1, (int) Math.ceil(sorted.length * 0.99) - 1)];
 	}
 
-	/** The file recorder, replaced by a fresh one now and then outside the measured work. */
+	/** The streamer's recorders, replaced by a fresh pair now and then outside the measured work. */
 	private static final class Swapped implements Recorder
 	{
 		private Recorder current;
@@ -168,7 +168,7 @@ public class RaidTickBench
 
 		void swap(OsrsCapture capture)
 		{
-			current = RaidScene.fileRecorder(GSON, Filepath.Unchecked.getRooted(Paths.get("/nonexistent/raid-bench")), task -> { });
+			current = RaidScene.streamerRecorder(GSON, Filepath.Unchecked.getRooted(Paths.get("/nonexistent/raid-bench")), task -> { });
 			current.open(capture.header());
 		}
 

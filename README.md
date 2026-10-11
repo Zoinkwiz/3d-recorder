@@ -94,11 +94,19 @@ milestones in the plugin's settings.
 
 ## Privacy
 
-The plugin doesn't connect to anything. It writes your recording to a
+Unless you turn on Show live in Embertide, the plugin doesn't connect to
+anything. It writes your recording to a
 `.partial` file in its folder as you play, and renames the file when each
 part is saved. To watch, it reads only the recordings in that same folder,
 and the game's own models, which the client already has. It reads no other
 files. Your recordings stay on your computer unless you choose to share them.
+
+If you turn on Show live in Embertide (off unless you do), the plugin also
+sends the current recording, row by row, to the Embertide app running on this
+same computer, over a local connection that never leaves your machine, and
+keeps that connection open so the app can tell the session is still running.
+What the app does with it is the app's own settings: it draws it, and it
+uploads it only if you have signed in.
 
 Studio runs in your browser and keeps the recording on your computer unless
 you make a share link. You don't need an account.

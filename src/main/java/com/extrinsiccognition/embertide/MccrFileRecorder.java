@@ -81,6 +81,11 @@ public final class MccrFileRecorder implements Recorder
 	@Override
 	public synchronized State state() { return state; }
 
+	Gson gson() { return gson; }
+
+	/** The row's text as this recorder writes it, so a mirror can send the same bytes. */
+	byte[] line(JsonObject record) { return text.line(gson, record); }
+
 	@Override
 	public synchronized String error() { return error; }
 
@@ -131,7 +136,17 @@ public final class MccrFileRecorder implements Recorder
 		{
 			return false;
 		}
-		byte[] row = text.line(gson, record);
+		return enqueue(record, line(record), control);
+	}
+
+	/** The row with its text from {@link #line}. */
+	synchronized boolean enqueue(JsonObject record, byte[] line, boolean control)
+	{
+		if (state != State.READY || (full && !control))
+		{
+			return false;
+		}
+		byte[] row = line;
 		// The budget counts rows as readers expand them, so the desktop's limit still holds.
 		int plain = row.length;
 		Map<String, long[]> moved = compact ? new HashMap<>() : null;

@@ -27,6 +27,23 @@ public class RowWriterTest
 		}
 	}
 
+	@Test
+	public void theAppendBodyIsTheRowsJoined()
+	{
+		Gson gson = new Gson();
+		RowWriter writer = new RowWriter();
+		List<String> json = new ArrayList<>();
+		List<byte[]> lines = new ArrayList<>();
+		for (JsonObject row : rows())
+		{
+			json.add(gson.toJson(row));
+			lines.add(writer.line(gson, row));
+			byte[] expected = ("{\"sequence\":" + lines.size() + ",\"records\":[" + String.join(",", json) + "]}").getBytes(StandardCharsets.UTF_8);
+			assertArrayEquals(expected, MccrRecorderClient.body(lines.size(), lines));
+		}
+		assertArrayEquals("{\"sequence\":0,\"records\":[]}".getBytes(StandardCharsets.UTF_8), MccrRecorderClient.body(0, new ArrayList<>()));
+	}
+
 	private static List<JsonObject> rows()
 	{
 		List<JsonObject> rows = new ArrayList<>();
