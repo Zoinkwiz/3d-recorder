@@ -35,6 +35,7 @@ import net.runelite.api.WallObject;
 import net.runelite.api.Projectile;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.WorldEntity;
+import net.runelite.api.WorldEntityConfig;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -57,6 +58,8 @@ public final class OsrsCapture
 	public static final int MAX_ACTORS = MAX_NPC_ACTORS + MAX_PLAYER_ACTORS;
 	public static final int TRACKED_PER_TICK = 1024;
 	public static final int MAX_MOTION = 600_000;
+	/** Boats written a scene, and objects a boat: a harbour full of other players' boats stays bounded. */
+	static final int MAX_BOATS = 24, MAX_BOAT_OBJECTS = 512, MAX_BOAT_ROWS = 20_000;
 	public static final int SNAPSHOT_CHUNK = 1024;
 	public static final int OBJECT_CHUNK = 512;
 	public static final double MAX_SECONDS = 1200;
@@ -110,6 +113,13 @@ public final class OsrsCapture
 	private final Map<GraphicsObject, Integer> sceneGraphics = new java.util.IdentityHashMap<>();
 	private final Map<GraphicsObject, Boolean> drawnGraphics = new java.util.IdentityHashMap<>();
 	private final Map<String, long[]> lastMotion = new HashMap<>();
+	/** Each boat's objects as last written, by its world view's id; present once its scene is written. */
+	private final Map<Integer, String> boatScenes = new HashMap<>();
+	/** Boats with an object spawned or despawned on deck since their scene was written. */
+	private final Set<Integer> boatsChanged = new HashSet<>();
+	/** Each boat's pose as last written: x, y in 1/1000 tile, the +x direction in 1/1000, plane. */
+	private final Map<Integer, long[]> boatPoses = new HashMap<>();
+	private int boatRows;
 	private boolean cellLimit;
 	private boolean sceneTruncated;
 	private int objectEvents;
@@ -845,6 +855,9 @@ public final class OsrsCapture
 		ownHits.clear();
 		known.clear();
 		sceneObjects.clear();
+		boatScenes.clear();
+		boatsChanged.clear();
+		boatPoses.clear();
 		visitedRegions.clear();
 		lastRegions = new int[0];
 		lastPlayerCell = Long.MIN_VALUE;
@@ -1175,6 +1188,8 @@ public final class OsrsCapture
 		{
 			return false;
 		}
+		if (boats) { boatScenes(view, t); }
+		if (!recording) { return false; }
 		appearance(me, PLAYER, t);
 		pose(view, me, PLAYER, at, t, true, -1);
 		JsonArray icons = headIcon(null, me, PLAYER);
@@ -1282,11 +1297,13 @@ public final class OsrsCapture
 		sceneEffects(view, at.getPlane());
 		if (!recording) { return; }
 		camera(view);
-		if (!recording || samples.size() == 0)
+		JsonArray boatSamples = boats && recording ? boatPoses(view) : null;
+		int count = samples.size() + (boatSamples == null ? 0 : boatSamples.size());
+		if (!recording || count == 0)
 		{
 			return;
 		}
-		if (motionCount + samples.size() > MAX_MOTION)
+		if (motionCount + count > MAX_MOTION)
 		{
 			stop("motion limit", true);
 			return;
@@ -1294,9 +1311,10 @@ public final class OsrsCapture
 		JsonObject payload = new JsonObject();
 		payload.addProperty("dimension", session.dimension);
 		payload.add("samples", samples);
+		if (boatSamples != null && boatSamples.size() > 0) { payload.add("boats", boatSamples); }
 		if (emit(RowTypes.MOTION, session.time(), payload, PLAYER, false))
 		{
-			motionCount += samples.size();
+			motionCount += count;
 		}
 	}
 
@@ -1565,6 +1583,132 @@ public final class OsrsCapture
 		WorldEntity boat = boatOf(actor);
 		int orientation = actor.getCurrentOrientation();
 		return boat == null ? orientation : (orientation + boat.getOrientation()) & 2047;
+	}
+
+	/**
+	 * Each loaded boat's own scene, written when it is first seen and again when something on deck changed:
+	 * its objects in the boat's own tiles (the land's object entries, x and y counted from the boat scene's
+	 * corner) and, the first time, its ground as osrs.ground lays it out. "gone" when it unloads.
+	 * Where the boat stands is in each osrs.motion row (`boatPoses`).
+	 */
+	private void boatScenes(WorldView top, double t)
+	{
+		Set<Integer> loaded = new HashSet<>();
+		for (WorldEntity entity : top.worldEntities())
+		{
+			WorldView own = entity == null ? null : entity.getWorldView();
+			if (own == null) { continue; }
+			int id = own.getId();
+			loaded.add(id);
+			boolean known = boatScenes.containsKey(id);
+			if ((known && !boatsChanged.remove(id)) || (!known && boatScenes.size() >= MAX_BOATS)) { continue; }
+			if (!boatScene(entity, own, id, !known, t)) { return; }
+		}
+		for (Integer id : new ArrayList<>(boatScenes.keySet()))
+		{
+			if (loaded.contains(id)) { continue; }
+			boatScenes.remove(id);
+			boatPoses.remove(id);
+			boatsChanged.remove(id);
+			if (!emitBoat(boatRow(id, "gone"), t)) { return; }
+		}
+	}
+
+	private boolean boatScene(WorldEntity entity, WorldView own, int id, boolean first, double t)
+	{
+		Scene scene = own.getScene();
+		Tile[][][] tiles = scene == null ? null : scene.getTiles();
+		if (tiles == null) { return true; }
+		int sizeX = Math.min(own.getSizeX(), Constants.SCENE_SIZE), sizeY = Math.min(own.getSizeY(), Constants.SCENE_SIZE);
+		JsonArray objects = new JsonArray();
+		List<Found> here = new ArrayList<>();
+		for (int plane = 0; plane < tiles.length; plane++)
+		{
+			for (int sx = 0; sx < Math.min(sizeX, tiles[plane].length); sx++)
+			{
+				for (int sy = 0; sy < Math.min(sizeY, tiles[plane][sx].length); sy++)
+				{
+					Tile tile = tiles[plane][sx][sy];
+					if (tile == null) { continue; }
+					here.clear();
+					anchoredObjects(tile, sx, sy, here);
+					for (Found found : here)
+					{
+						if (objects.size() < MAX_BOAT_OBJECTS) { objects.add(entry(found, sx, sy, plane, sx, sy)); }
+					}
+				}
+			}
+		}
+		String written = objects.toString();
+		if (!first && written.equals(boatScenes.get(id))) { return true; }
+		boatScenes.put(id, written);
+		JsonObject payload = boatRow(id, "scene");
+		WorldEntityConfig kind = entity.getConfig();
+		if (kind != null) { payload.addProperty("config_id", kind.getId()); }
+		payload.addProperty("size_x", sizeX);
+		payload.addProperty("size_y", sizeY);
+		payload.add("objects", objects);
+		if (!emitBoat(payload, t)) { return false; }
+		if (!first) { return true; }
+		for (JsonObject ground : GroundRows.of(own, session.dimension, sizeX, sizeY))
+		{
+			ground.addProperty("boat", "boat:" + id);
+			ground.addProperty("scope", "ground");
+			if (!emitBoat(ground, t)) { return false; }
+		}
+		return true;
+	}
+
+	private JsonObject boatRow(int id, String scope)
+	{
+		JsonObject payload = new JsonObject();
+		payload.addProperty("dimension", session.dimension);
+		payload.addProperty("boat", "boat:" + id);
+		payload.addProperty("scope", scope);
+		return payload;
+	}
+
+	private boolean emitBoat(JsonObject payload, double t)
+	{
+		if (boatRows >= MAX_BOAT_ROWS) { return true; }
+		boatRows++;
+		return emit(RowTypes.BOAT, t, payload, PLAYER, false);
+	}
+
+	/**
+	 * Where each written boat stands this client cycle, when it moved: [boat, x, y, plane, dx, dy], x and y the
+	 * map tile under the centre of the boat's own scene and dx, dy the map direction of the boat's own +x. Both
+	 * are read through transformToMainWorld, so a reader places any tile of the boat without knowing the
+	 * client's pivot or which way its heading counts.
+	 */
+	private JsonArray boatPoses(WorldView top)
+	{
+		JsonArray poses = new JsonArray();
+		for (WorldEntity entity : top.worldEntities())
+		{
+			WorldView own = entity == null ? null : entity.getWorldView();
+			if (own == null || !boatScenes.containsKey(own.getId())) { continue; }
+			int sizeX = Math.min(own.getSizeX(), Constants.SCENE_SIZE), sizeY = Math.min(own.getSizeY(), Constants.SCENE_SIZE);
+			LocalPoint centre = new LocalPoint(sizeX * SceneMapper.LOCAL_TILE_SIZE / 2, sizeY * SceneMapper.LOCAL_TILE_SIZE / 2, own);
+			LocalPoint main = entity.transformToMainWorld(centre);
+			LocalPoint ahead = main == null ? null : entity.transformToMainWorld(centre.dx(SceneMapper.LOCAL_TILE_SIZE));
+			if (ahead == null) { continue; }
+			long x = Math.round((top.getBaseX() + main.getX() / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0);
+			long y = Math.round((top.getBaseY() + main.getY() / (double) SceneMapper.LOCAL_TILE_SIZE) * 1000.0);
+			long dx = Math.round((ahead.getX() - main.getX()) * 1000.0 / SceneMapper.LOCAL_TILE_SIZE);
+			long dy = Math.round((ahead.getY() - main.getY()) * 1000.0 / SceneMapper.LOCAL_TILE_SIZE);
+			long[] now = {x, y, dx, dy, top.getPlane()};
+			if (Arrays.equals(now, boatPoses.put(own.getId(), now))) { continue; }
+			JsonArray pose = new JsonArray(6);
+			pose.add("boat:" + own.getId());
+			pose.add(x / 1000.0);
+			pose.add(y / 1000.0);
+			pose.add(top.getPlane());
+			pose.add(dx / 1000.0);
+			pose.add(dy / 1000.0);
+			poses.add(pose);
+		}
+		return poses;
 	}
 
 	/** Test loaded-scene bounds and plane; this is not an on-screen visibility check. */
@@ -2487,6 +2631,16 @@ public final class OsrsCapture
 		Player me = client.getLocalPlayer();
 		WorldView view = client.getTopLevelWorldView();
 		seeBoats(view);
+		if (boats)
+		{
+			// An object on deck sits in the boat's own tiles, far off the map: the boat's scene is written again.
+			WorldView own = object.getWorldView();
+			if (own != null && own != view && !own.isTopLevel())
+			{
+				boatsChanged.add(own.getId());
+				return;
+			}
+		}
 		WorldPoint at = tile.getWorldLocation();
 		if (me == null || view == null || at == null || me.getWorldLocation() == null)
 		{

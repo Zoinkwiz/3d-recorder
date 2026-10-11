@@ -45,6 +45,12 @@ public final class GroundRows
 
 	public static List<JsonObject> of(WorldView view, String dimension)
 	{
+		return of(view, dimension, SIZE, SIZE);
+	}
+
+	/** The same rows for a scene of its own size: a Sailing boat's world view is smaller than the map's. */
+	public static List<JsonObject> of(WorldView view, String dimension, int sizeX, int sizeY)
+	{
 		List<JsonObject> rows = new ArrayList<>();
 		Scene scene = view.getScene();
 		Tile[][][] tiles = scene == null ? null : scene.getTiles();
@@ -58,17 +64,17 @@ public final class GroundRows
 		{
 			int start = 0, chars = 0;
 			List<JsonArray> band = new ArrayList<>();
-			for (int x = 0; x < SIZE; x++)
+			for (int x = 0; x < sizeX; x++)
 			{
 				JsonArray column = new JsonArray();
-				for (int y = 0; y < SIZE; y++)
+				for (int y = 0; y < sizeY; y++)
 				{
 					tile(column, physical(tiles, settings, plane, x, y));
 				}
 				int length = column.toString().length() + 1;
 				if (!band.isEmpty() && chars + length > MAX_TILE_CHARS)
 				{
-					rows.add(row(view, dimension, plane, start, band, heights, settings));
+					rows.add(row(view, dimension, plane, start, band, heights, settings, sizeY));
 					start = x;
 					chars = 0;
 					band = new ArrayList<>();
@@ -76,7 +82,7 @@ public final class GroundRows
 				band.add(column);
 				chars += length;
 			}
-			rows.add(row(view, dimension, plane, start, band, heights, settings));
+			rows.add(row(view, dimension, plane, start, band, heights, settings, sizeY));
 		}
 		return rows;
 	}
@@ -146,7 +152,7 @@ public final class GroundRows
 	}
 
 	private static JsonObject row(WorldView view, String dimension, int plane, int start, List<JsonArray> band,
-		int[][][] heights, byte[][][] settings)
+		int[][][] heights, byte[][][] settings, int sizeY)
 	{
 		JsonObject row = new JsonObject();
 		row.addProperty("base_x", view.getBaseX());
@@ -166,7 +172,7 @@ public final class GroundRows
 			{
 				JsonArray column = new JsonArray();
 				int[] values = grid[x];
-				for (int y = 0; values != null && y <= SIZE && y < values.length; y++) { column.add(y == 0 ? values[0] : values[y] - values[y - 1]); }
+				for (int y = 0; values != null && y <= sizeY && y < values.length; y++) { column.add(y == 0 ? values[0] : values[y] - values[y - 1]); }
 				corners.add(column);
 			}
 			row.add("heights", corners);
@@ -176,7 +182,7 @@ public final class GroundRows
 			JsonArray bridges = new JsonArray();
 			for (int x = start; x < start + band.size(); x++)
 			{
-				for (int y = 0; y < SIZE; y++)
+				for (int y = 0; y < sizeY; y++)
 				{
 					if (bridge(settings, x, y)) { bridges.add(x); bridges.add(y); }
 				}
