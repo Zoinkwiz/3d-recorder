@@ -21,7 +21,7 @@ import static org.junit.Assert.assertTrue;
 public class RaidHudTest
 {
 	private static final Gson GSON = new Gson();
-	private static final String SCRIPTED = "1270:36ef7f7825dbf6fee417f0893c0205a822401001491d6108be5efcd74b0eaae0";
+	private static final String SCRIPTED = "1274:5f18a30f142a6ef1351edb54644c44bc41cc94ff8c7e75b65fc0bdc42c05c06c";
 
 	@Test
 	public void headIconsAreWrittenWhenTheyChange()

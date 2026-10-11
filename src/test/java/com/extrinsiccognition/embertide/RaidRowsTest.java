@@ -25,8 +25,8 @@ public class RaidRowsTest
 {
 	private static final Gson GSON = new Gson();
 	private static final int TICKS = 12;
-	private static final String ROWS = "1260:684d187bb9e4c8e5c7378b937555b050a0eff19e9541b84f0ba188d6d75fda7f";
-	private static final String FILE = "1261:67c486c2f4d8e8d25b3416e7a5a9ec092cb4655c6a95e61d63dfea5d94133a3c";
+	private static final String ROWS = "1264:140c8ae9d04132e1c9915718218d4bff377d95e921213398f814edc979a51b20";
+	private static final String FILE = "1265:248754ff3cb18f62d68c724cb6e42049a7fc5ee09fc5f16236c591cee1ca6c5a";
 	private Path dir;
 
 	@Before
