@@ -59,7 +59,7 @@ public final class MccrFileRecorder implements Recorder
 	private boolean draining;
 	private long drainedAt = System.nanoTime() - FLUSH_NANOS;
 	// osrs.motion x and y as thousandths of a tile, each actor's first absolute and then its change.
-	static final String MOTION_XY = "delta-milli";
+	public static final String MOTION_XY = "delta-milli";
 	private final Map<String, long[]> lastXY = new HashMap<>();
 	private boolean compact;
 	private final RowWriter text = new RowWriter();
@@ -189,7 +189,7 @@ public final class MccrFileRecorder implements Recorder
 	{
 		JsonElement type = record.get("type");
 		JsonElement payload = record.get("payload");
-		if (type == null || !"osrs.motion".equals(type.getAsString()) || payload == null || !payload.isJsonObject()
+		if (type == null || !RowTypes.MOTION.equals(type.getAsString()) || payload == null || !payload.isJsonObject()
 			|| !payload.getAsJsonObject().has("samples") || !payload.getAsJsonObject().get("samples").isJsonArray())
 		{
 			return null;

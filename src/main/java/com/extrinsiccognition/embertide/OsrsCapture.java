@@ -834,7 +834,7 @@ public final class OsrsCapture
 			left.addProperty("actor_id", id);
 			left.addProperty("state", "left");
 			left.addProperty("dimension", session.dimension);
-			if (!emit("mccr.actor_lifecycle", t, left, id, false)) { return; }
+			if (!emit(RowTypes.LIFECYCLE, t, left, id, false)) { return; }
 			leftIds.add(id);
 		}
 		presentActors.clear();
@@ -854,7 +854,7 @@ public final class OsrsCapture
 		scene.addProperty("reset", true);
 		scene.addProperty("segment", segment);
 		scene.addProperty("instance", instance);
-		emit("mccr.scene", t, scene, PLAYER, false);
+		emit(RowTypes.SCENE, t, scene, PLAYER, false);
 	}
 
 	public void actorSpawned(Actor actor) { if (actor != null) { presentActors.add(actor); } }
@@ -869,7 +869,7 @@ public final class OsrsCapture
 			payload.addProperty("actor_id", id);
 			payload.addProperty("state", "left");
 			payload.addProperty("dimension", session.dimension);
-			emit("mccr.actor_lifecycle", session.time(), payload, id, false);
+			emit(RowTypes.LIFECYCLE, session.time(), payload, id, false);
 		}
 	}
 
@@ -929,7 +929,7 @@ public final class OsrsCapture
 	JsonObject header()
 	{
 		JsonObject header = new JsonObject();
-		header.addProperty("type", "mccr.header");
+		header.addProperty("type", RowTypes.HEADER);
 		header.addProperty("format", MccrSession.FORMAT);
 		header.addProperty("profile", MccrSession.PROFILE);
 		header.addProperty("schema", "CorePercept envelope + ec.mccr.spatial/1 + " + OSRS_PROFILE);
@@ -978,6 +978,10 @@ public final class OsrsCapture
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
 			+ "osrs.scene_loaded once the whole scene is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
+			+ "osrs.ground on each scene load, the loaded scene's ground as the client built it, one row per map plane (bridges keep their own plane) and band of scene columns: "
+			+ "{base_x, base_y, plane, x, columns, tiles, heights, bridges on plane 1}, tiles a column of " + GroundRows.SIZE + " per scene column from x, each 0 for none, "
+			+ "a paint [sw, se - sw, ne - sw, nw - sw] with a fifth texture if it has one, or a shaped tile [-shape, rotation, then colour a, b - a, c - a and texture per face], colours as the client's HSL with 12345678 for hidden; "
+			+ "heights the plane's corner heights for scene columns x to x + columns, each column its first then each corner's difference from the one before; bridges [x, y, ...] the scene tiles whose floors draw one plane down; "
 			+ "osrs.poses entries end with the id of the actor each one is targeting (\"player\" for the local player) or null, and player.position carries osrs.interacting the same way; "
 			+ "with drops and milestones on, osrs.loot {source_kind, source_name, npc_id, source_actor, items [[item_id, quantity, ge_each]], total_ge} per loot received "
 			+ "and osrs.game_message {kind, fields} for a closed list of the game's own milestone messages, never their text; "
@@ -1135,6 +1139,13 @@ public final class OsrsCapture
 			region(view, t);
 		}
 		if (!recording) { return false; }
+		if (rediscover)
+		{
+			for (JsonObject ground : GroundRows.of(view, session.dimension))
+			{
+				if (!emit(RowTypes.GROUND, t, ground, PLAYER, false)) { return false; }
+			}
+		}
 		Scene skyScene = view.getScene();
 		JsonObject sky = sceneSkybox.changed(skyScene == null ? null : skyScene.getSkybox(),
 			client.getTextureProvider() == null ? 0.8 : client.getTextureProvider().getBrightness());
@@ -1206,7 +1217,7 @@ public final class OsrsCapture
 			JsonObject payload = new JsonObject();
 			payload.addProperty("dimension", session.dimension);
 			payload.add("poses", crowd);
-			if (emit("osrs.poses", t, payload, PLAYER, false))
+			if (emit(RowTypes.POSES, t, payload, PLAYER, false))
 			{
 				poseCount += crowd.size();
 			}
@@ -1278,7 +1289,7 @@ public final class OsrsCapture
 		JsonObject payload = new JsonObject();
 		payload.addProperty("dimension", session.dimension);
 		payload.add("samples", samples);
-		if (emit("osrs.motion", session.time(), payload, PLAYER, false))
+		if (emit(RowTypes.MOTION, session.time(), payload, PLAYER, false))
 		{
 			motionCount += samples.size();
 		}
@@ -1439,7 +1450,7 @@ public final class OsrsCapture
 			payload.add("instance_template_chunks", planes);
 		}
 		payload.addProperty("dimension", session.dimension);
-		emit("osrs.region", t, payload, PLAYER, false);
+		emit(RowTypes.REGION, t, payload, PLAYER, false);
 		if (view.isInstance() && !instanceHeightsWritten)
 		{
 			int[][][] heights = view.getTileHeights();
@@ -1461,7 +1472,7 @@ public final class OsrsCapture
 					grid.addProperty("base_y", view.getBaseY());
 					grid.addProperty("plane", p);
 					grid.add("heights", columns);
-					if (!emit("osrs.instance_heights", t, grid, PLAYER, false)) { return; }
+					if (!emit(RowTypes.INSTANCE_HEIGHTS, t, grid, PLAYER, false)) { return; }
 				}
 				instanceHeightsWritten = true;
 			}
@@ -1542,7 +1553,7 @@ public final class OsrsCapture
 			rejoin.addProperty("actor_id", id);
 			rejoin.addProperty("state", "joined");
 			rejoin.addProperty("dimension", session.dimension);
-			if (!emit("mccr.actor_lifecycle", t, rejoin, id, false)) { return false; }
+			if (!emit(RowTypes.LIFECYCLE, t, rejoin, id, false)) { return false; }
 		}
 		if (actors.contains(id))
 		{
@@ -1572,7 +1583,7 @@ public final class OsrsCapture
 		{
 			payload.addProperty("combat_level", combatLevel);
 		}
-		if (!emit("presence", t, payload, id, false))
+		if (!emit(RowTypes.PRESENCE, t, payload, id, false))
 		{
 			return false;
 		}
@@ -1613,7 +1624,7 @@ public final class OsrsCapture
 		{
 			payload.addProperty("combat_level", player.getCombatLevel());
 		}
-		if (emit("osrs.appearance", t, payload, id, false))
+		if (emit(RowTypes.APPEARANCE, t, payload, id, false))
 		{
 			appearance.put(id, hash);
 		}
@@ -1676,7 +1687,7 @@ public final class OsrsCapture
 			osrs.addProperty("interacting", interacting);
 		}
 		payload.add("osrs", osrs);
-		if (emit("player.position", t, payload, id, false))
+		if (emit(RowTypes.POSITION, t, payload, id, false))
 		{
 			poseCount++;
 		}
@@ -2256,7 +2267,7 @@ public final class OsrsCapture
 			payload.addProperty("dimension", session.dimension);
 			payload.addProperty("scope", scope);
 			payload.add("objects", chunk);
-			if (!emit("osrs.object", t, payload, PLAYER, false))
+			if (!emit(RowTypes.OBJECT, t, payload, PLAYER, false))
 			{
 				return false;
 			}
@@ -2308,7 +2319,7 @@ public final class OsrsCapture
 		payload.addProperty("dimension", session.dimension);
 		payload.addProperty("coverage", "observed-cells");
 		payload.add("cells", list);
-		if (!emit("mccr.spatial_snapshot", t, payload, PLAYER, false))
+		if (!emit(RowTypes.SNAPSHOT, t, payload, PLAYER, false))
 		{
 			return false;
 		}
@@ -2439,7 +2450,7 @@ public final class OsrsCapture
 			JsonArray objects = new JsonArray();
 			objects.add(entry(found, anchorX, anchorY, at.getPlane(), anchorX, anchorY));
 			payload.add("objects", objects);
-			if (emit("osrs.object", t, payload, PLAYER, false)) { objectEvents++; }
+			if (emit(RowTypes.OBJECT, t, payload, PLAYER, false)) { objectEvents++; }
 		}
 		WorldPoint mine = me.getWorldLocation();
 		int dx = at.getX() - mine.getX();
