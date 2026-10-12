@@ -36,6 +36,8 @@ import net.runelite.api.Projectile;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldEntityConfig;
+import net.runelite.api.DynamicObject;
+import net.runelite.api.Renderable;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -117,6 +119,11 @@ public final class OsrsCapture
 	private final Map<Integer, String> boatScenes = new HashMap<>();
 	/** Boats with an object spawned or despawned on deck since their scene was written. */
 	private final Set<Integer> boatsChanged = new HashSet<>();
+	/**
+	 * Per boat, its deck objects that the client animates as it is told (a cannon fires, then rests), with the
+	 * animation each was written with: asked each tick, since a change of animation is no spawn or despawn.
+	 */
+	private final Map<Integer, List<Object[]>> boatAnimated = new HashMap<>();
 	/** Each boat's pose as last written: x, y in 1/1000 tile, the +x direction in 1/1000, plane. */
 	private final Map<Integer, long[]> boatPoses = new HashMap<>();
 	private int boatRows;
@@ -858,6 +865,7 @@ public final class OsrsCapture
 		boatScenes.clear();
 		boatsChanged.clear();
 		boatPoses.clear();
+		boatAnimated.clear();
 		visitedRegions.clear();
 		lastRegions = new int[0];
 		lastPlayerCell = Long.MIN_VALUE;
@@ -940,6 +948,25 @@ public final class OsrsCapture
 		actorIds.clear();
 		for (NPC npc : view.npcs()) { actorSpawned(npc); }
 		for (Player player : view.players()) { actorSpawned(player); }
+		// The crew of a Sailing boat live in the boat's own world view, not the map's, and a scene load
+		// does not spawn them again: seeded only from the map's lists they were never present, and were
+		// drawn only while they spoke (3d-recorder#14).
+		if (boats)
+		{
+			for (WorldEntity entity : view.worldEntities())
+			{
+				WorldView own = entity == null ? null : entity.getWorldView();
+				if (own != null) { seedBoatActors(own); }
+			}
+		}
+	}
+
+	private void seedBoatActors(WorldView own)
+	{
+		IndexedObjectSet<? extends NPC> npcs = own.npcs();
+		IndexedObjectSet<? extends Player> players = own.players();
+		if (npcs != null) { for (NPC npc : npcs) { actorSpawned(npc); } }
+		if (players != null) { for (Player player : players) { actorSpawned(player); } }
 	}
 
 	JsonObject header()
@@ -1601,7 +1628,10 @@ public final class OsrsCapture
 			int id = own.getId();
 			loaded.add(id);
 			boolean known = boatScenes.containsKey(id);
+			if (known && animationsChanged(id)) { boatsChanged.add(id); }
 			if ((known && !boatsChanged.remove(id)) || (!known && boatScenes.size() >= MAX_BOATS)) { continue; }
+			// A boat that loads after the scene did brings its crew with it.
+			if (!known) { seedBoatActors(own); }
 			if (!boatScene(entity, own, id, !known, t)) { return; }
 		}
 		for (Integer id : new ArrayList<>(boatScenes.keySet()))
@@ -1610,6 +1640,7 @@ public final class OsrsCapture
 			boatScenes.remove(id);
 			boatPoses.remove(id);
 			boatsChanged.remove(id);
+			boatAnimated.remove(id);
 			if (!emitBoat(boatRow(id, "gone"), t)) { return; }
 		}
 	}
@@ -1622,6 +1653,7 @@ public final class OsrsCapture
 		int sizeX = Math.min(own.getSizeX(), Constants.SCENE_SIZE), sizeY = Math.min(own.getSizeY(), Constants.SCENE_SIZE);
 		JsonArray objects = new JsonArray();
 		List<Found> here = new ArrayList<>();
+		List<Object[]> animated = new ArrayList<>();
 		for (int plane = 0; plane < tiles.length; plane++)
 		{
 			for (int sx = 0; sx < Math.min(sizeX, tiles[plane].length); sx++)
@@ -1634,11 +1666,21 @@ public final class OsrsCapture
 					anchoredObjects(tile, sx, sy, here);
 					for (Found found : here)
 					{
-						if (objects.size() < MAX_BOAT_OBJECTS) { objects.add(entry(found, sx, sy, plane, sx, sy)); }
+						if (objects.size() >= MAX_BOAT_OBJECTS) { continue; }
+						JsonObject entry = entry(found, sx, sy, plane, sx, sy);
+						DynamicObject moving = dynamic(found.object);
+						if (moving != null && animated.size() < MAX_BOAT_OBJECTS)
+						{
+							int animation = animationOf(moving);
+							animated.add(new Object[]{moving, animation});
+							if (animation >= 0) { entry.addProperty("animation", animation); }
+						}
+						objects.add(entry);
 					}
 				}
 			}
 		}
+		boatAnimated.put(id, animated);
 		String written = objects.toString();
 		if (!first && written.equals(boatScenes.get(id))) { return true; }
 		boatScenes.put(id, written);
@@ -1657,6 +1699,31 @@ public final class OsrsCapture
 			if (!emitBoat(ground, t)) { return false; }
 		}
 		return true;
+	}
+
+	/** The object's renderable when the client animates it (a cannon, a brazier): what it is playing can change. */
+	private static DynamicObject dynamic(TileObject object)
+	{
+		Renderable renderable = object instanceof GameObject ? ((GameObject) object).getRenderable() : null;
+		return renderable instanceof DynamicObject ? (DynamicObject) renderable : null;
+	}
+
+	private static int animationOf(DynamicObject object)
+	{
+		net.runelite.api.Animation animation = object.getAnimation();
+		return animation == null ? -1 : animation.getId();
+	}
+
+	/** Whether any animated object on this boat now plays something other than what was written. */
+	private boolean animationsChanged(int id)
+	{
+		List<Object[]> animated = boatAnimated.get(id);
+		if (animated == null) { return false; }
+		for (Object[] held : animated)
+		{
+			if (animationOf((DynamicObject) held[0]) != (Integer) held[1]) { return true; }
+		}
+		return false;
 	}
 
 	private JsonObject boatRow(int id, String scope)

@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import net.runelite.api.Client;
 import net.runelite.api.Constants;
+import net.runelite.api.DynamicObject;
+import net.runelite.api.NPC;
 import net.runelite.api.GameObject;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.ObjectComposition;
@@ -39,9 +41,27 @@ public class BoatRowsTest
 
 	private final List<WorldEntity> entities = new ArrayList<>();
 	private final Tile[][][] deck = new Tile[4][SIZE_X][SIZE_Y];
-	private final WorldView boatView = fake(WorldView.class, Map.of("getId", 7, "getSizeX", SIZE_X, "getSizeY", SIZE_Y,
-		"getBaseX", 15296, "getBaseY", 3200, "getScene", fake(Scene.class, Map.of("getTiles", deck)),
-		"getTileHeights", new int[4][SIZE_X + 1][SIZE_Y + 1]));
+	/** The people the boat's own world view holds: its crew. */
+	private final List<NPC> crew = new ArrayList<>();
+	private final WorldView boatView = (WorldView) Proxy.newProxyInstance(WorldView.class.getClassLoader(), new Class<?>[]{WorldView.class}, (proxy, method, args) ->
+	{
+		switch (method.getName())
+		{
+			case "getId": return 7;
+			case "getSizeX": return SIZE_X;
+			case "getSizeY": return SIZE_Y;
+			case "getBaseX": return 15296;
+			case "getBaseY": return 3200;
+			case "getScene": return fake(Scene.class, Map.of("getTiles", deck));
+			case "getTileHeights": return new int[4][SIZE_X + 1][SIZE_Y + 1];
+			case "npcs": return set(crew);
+			case "players": return set(List.of());
+			case "isTopLevel": return false;
+			case "hashCode": return System.identityHashCode(proxy);
+			case "equals": return proxy == args[0];
+			default: return method.getReturnType() == int.class ? 0 : method.getReturnType() == boolean.class ? false : null;
+		}
+	});
 	private final WorldEntity boat = fake(WorldEntity.class, Map.of("getWorldView", boatView,
 		"getConfig", fake(WorldEntityConfig.class, Map.of("getId", 3))));
 	private final Fakes.Rows rows = new Fakes.Rows();
@@ -54,6 +74,8 @@ public class BoatRowsTest
 			"getBaseX", BASE_X, "getBaseY", BASE_Y, "getMapRegions", new int[]{11823}, "getTileHeights", new int[4][Constants.SCENE_SIZE + 1][Constants.SCENE_SIZE + 1],
 			"npcs", empty(), "players", empty(), "isTopLevel", true));
 		answers.put("worldEntities", fake(IndexedObjectSet.class, Map.of()));
+		answers.put("getSizeX", Constants.SCENE_SIZE);
+		answers.put("getSizeY", Constants.SCENE_SIZE);
 		WorldView top = (WorldView) Proxy.newProxyInstance(WorldView.class.getClassLoader(), new Class<?>[]{WorldView.class}, (proxy, method, args) ->
 		{
 			if (method.getName().equals("worldEntities")) { return set(entities); }
@@ -66,7 +88,7 @@ public class BoatRowsTest
 		Player me = fake(Player.class, Map.of("getWorldLocation", new WorldPoint(3039, 2646, 0), "getName", "Tester"));
 		Client client = fake(Client.class, Map.of("getTopLevelWorldView", top, "getLocalPlayer", me, "getTickCount", 42,
 			"getObjectDefinition", fake(ObjectComposition.class, Map.of())));
-		capture = new OsrsCapture(client, rows, fake(EmbertideConfig.class, Map.of("captureRadius", 4)), "osrs:surface", "Tester", 301);
+		capture = new OsrsCapture(client, rows, fake(EmbertideConfig.class, Map.of("captureRadius", 4, "trackNpcs", true)), "osrs:surface", "Tester", 301);
 	}
 
 	@Test
@@ -162,6 +184,45 @@ public class BoatRowsTest
 		assertEquals("gone", last.get("scope").getAsString());
 		assertEquals("boat:7", last.get("boat").getAsString());
 		assertFalse(last.has("objects"));
+	}
+
+	@Test
+	public void theCrewOnABoatAreInThePictureAfterASceneLoad()
+	{
+		// Sailor Jakob, standing on the deck at the boat scene's (5, 7): never spawned again by a scene load.
+		crew.add(fake(NPC.class, Map.of("getName", "Sailor Jakob", "getIndex", 49129, "getId", 15200, "getWorldView", boatView,
+			"getLocalLocation", new LocalPoint(5 * 128 + 64, 7 * 128 + 64, boatView), "getWorldLocation", new WorldPoint(15301, 3207, 1))));
+		entities.add(sailing());
+		capture.start();
+		capture.tick(true);
+		capture.tick(true);
+		List<String> posed = new ArrayList<>();
+		of("osrs.poses").forEach(row -> payload(row).getAsJsonArray("poses").forEach(pose -> posed.add(pose.getAsJsonArray().get(0).getAsString())));
+		assertTrue(posed.toString(), posed.contains("npc:sailor jakob#49129"));
+	}
+
+	@Test
+	public void aDeckObjectWritesWhatTheClientIsPlayingAndAChangeRewritesTheBoat()
+	{
+		int[] playing = {13322};
+		net.runelite.api.Animation fire = (net.runelite.api.Animation) Proxy.newProxyInstance(net.runelite.api.Animation.class.getClassLoader(),
+			new Class<?>[]{net.runelite.api.Animation.class}, (proxy, method, args) -> method.getName().equals("getId") ? playing[0] : null);
+		DynamicObject cannon = fake(DynamicObject.class, Map.of("getAnimation", fire));
+		deck[1][2][7] = fake(Tile.class, Map.of("getGameObjects", new GameObject[]{fake(GameObject.class, Map.of("getId", 59452, "getConfig", 10, "getRenderable", cannon))}));
+		entities.add(sailing());
+		capture.start();
+		capture.tick(true);
+		JsonObject written = stream(payload(of("osrs.boat").get(0)).getAsJsonArray("objects")).filter(o -> o.get("id").getAsInt() == 59452).findFirst().get();
+		assertEquals(13322, written.get("animation").getAsInt());
+		int before = of("osrs.boat").size();
+		capture.tick(false);
+		assertEquals(before, of("osrs.boat").size());
+		playing[0] = 13321;
+		capture.tick(false);
+		List<JsonObject> boatRows = of("osrs.boat");
+		assertEquals(before + 1, boatRows.size());
+		JsonObject rested = stream(payload(boatRows.get(boatRows.size() - 1)).getAsJsonArray("objects")).filter(o -> o.get("id").getAsInt() == 59452).findFirst().get();
+		assertEquals(13321, rested.get("animation").getAsInt());
 	}
 
 	/** The boat turned a quarter anticlockwise, its scene's centre over the map's local (MAIN_X, MAIN_Y). */
