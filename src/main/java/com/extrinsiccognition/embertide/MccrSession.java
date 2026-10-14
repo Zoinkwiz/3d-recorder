@@ -16,7 +16,7 @@ public final class MccrSession
 	public static final String PROFILE = "ec.mccr.spatial/1";
 	public static final String SOURCE = "osrs.runelite";
 	/** The plugin version, as build.gradle and runelite-plugin.properties give it. */
-	public static final String VERSION = "0.4.0";
+	public static final String VERSION = "0.5.0";
 	public static final String RECORDER = "embertide-runelite/" + VERSION;
 	public static final String GAME = "osrs";
 
