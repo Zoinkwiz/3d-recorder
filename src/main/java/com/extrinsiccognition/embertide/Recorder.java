@@ -27,7 +27,8 @@ public interface Recorder
 
 	CompletableFuture<Void> finish();
 
-	CompletableFuture<Void> openStudio();
+	/** Opens Studio for this recording, where the recorder can. */
+	default CompletableFuture<Void> openStudio() { return CompletableFuture.completedFuture(null); }
 
-	String destination();
+	default String destination() { return ""; }
 }

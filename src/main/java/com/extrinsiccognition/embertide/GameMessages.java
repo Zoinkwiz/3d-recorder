@@ -63,95 +63,75 @@ final class GameMessages
 		Matcher m;
 		if ((m = KILL_COUNT.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("boss", name(m.group(1)));
-			f.addProperty("count", number(m.group(2)));
-			return new Match("kill_count", f);
+			return found("kill_count", "boss", name(m.group(1)), "count", number(m.group(2)));
 		}
 		if ((m = PERSONAL_BEST.matcher(line)).matches())
 		{
 			double seconds = duration(m.group(1));
-			if (seconds < 0) { return null; }
-			JsonObject f = new JsonObject();
-			f.addProperty("duration_s", seconds);
-			return new Match("personal_best", f);
+			return seconds < 0 ? null : found("personal_best", "duration_s", seconds);
 		}
-		if (PET_FOLLOWER.matcher(line).matches()) { return pet("follower"); }
-		if (PET_BACKPACK.matcher(line).matches()) { return pet("backpack"); }
-		if (PET_DUPLICATE.matcher(line).matches()) { return pet("duplicate"); }
+		if (PET_FOLLOWER.matcher(line).matches()) { return found("pet", "how", "follower"); }
+		if (PET_BACKPACK.matcher(line).matches()) { return found("pet", "how", "backpack"); }
+		if (PET_DUPLICATE.matcher(line).matches()) { return found("pet", "how", "duplicate"); }
 		if ((m = COLLECTION_LOG.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("item", name(m.group(1)));
-			return new Match("collection_log", f);
+			return found("collection_log", "item", name(m.group(1)));
 		}
 		if ((m = VALUABLE_DROP.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("item", name(m.group(2)));
-			f.addProperty("quantity", m.group(1) == null ? 1 : number(m.group(1)));
-			f.addProperty("value", number(m.group(3)));
-			return new Match("valuable_drop", f);
+			return found("valuable_drop", "item", name(m.group(2)), "quantity", quantity(m.group(1)), "value", number(m.group(3)));
 		}
 		if ((m = UNTRADEABLE_DROP.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("item", name(m.group(2)));
-			f.addProperty("quantity", m.group(1) == null ? 1 : number(m.group(1)));
-			return new Match("untradeable_drop", f);
+			return found("untradeable_drop", "item", name(m.group(2)), "quantity", quantity(m.group(1)));
 		}
 		if ((m = CLUE_COMPLETE.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("count", number(m.group(1)));
-			f.addProperty("tier", m.group(2));
-			return new Match("clue_complete", f);
+			return found("clue_complete", "count", number(m.group(1)), "tier", m.group(2));
 		}
 		if ((m = COMBAT_TASK.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("tier", m.group(1));
-			return new Match("combat_task", f);
+			return found("combat_task", "tier", m.group(1));
 		}
 		if ((m = SLAYER_TASK.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("tasks", number(m.group(1)));
-			if (m.group(2) != null)
-			{
-				f.addProperty("points", number(m.group(2)));
-			}
-			return new Match("slayer_task_complete", f);
+			return found("slayer_task_complete", "tasks", number(m.group(1)), "points", m.group(2) == null ? null : number(m.group(2)));
 		}
 		if ((m = QUEST_COMPLETE.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("quest", name(m.group(1)));
-			return new Match("quest_complete", f);
+			return found("quest_complete", "quest", name(m.group(1)));
 		}
 		if ((m = DIARY_COMPLETE.matcher(line)).matches())
 		{
-			JsonObject f = new JsonObject();
-			f.addProperty("tier", m.group(1));
-			f.addProperty("area", name(m.group(2)));
-			return new Match("diary_complete", f);
+			return found("diary_complete", "tier", m.group(1), "area", name(m.group(2)));
 		}
 		if (SUPERIOR.matcher(line).matches())
 		{
-			return new Match("superior_spawn", new JsonObject());
+			return found("superior_spawn");
 		}
 		if (OWN_DEATH.matcher(line).matches())
 		{
-			return new Match("own_death", new JsonObject());
+			return found("own_death");
 		}
 		return null;
 	}
 
-	private static Match pet(String how)
+	/** Fields as name, value pairs, in order; a null value is left out. */
+	private static Match found(String kind, Object... fields)
 	{
 		JsonObject f = new JsonObject();
-		f.addProperty("how", how);
-		return new Match("pet", f);
+		for (int i = 0; i < fields.length; i += 2)
+		{
+			Object value = fields[i + 1];
+			if (value instanceof String) { f.addProperty((String) fields[i], (String) value); }
+			else if (value != null) { f.addProperty((String) fields[i], (Number) value); }
+		}
+		return new Match(kind, f);
+	}
+
+	private static long quantity(String value)
+	{
+		return value == null ? 1 : number(value);
 	}
 
 	private static String name(String value)

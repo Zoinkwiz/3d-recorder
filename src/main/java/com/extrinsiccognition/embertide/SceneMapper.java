@@ -12,6 +12,8 @@ public final class SceneMapper
 	public static final int PLANE_HEIGHT = 8;
 	public static final int MAX_MATERIAL_LENGTH = 64;
 	public static final String AIR = "air";
+	/** Ground cell materials: the tile's overlay, else its underlay, id as the tile stores it (definition plus one). */
+	public static final String OVERLAY = "osrs:overlay:", UNDERLAY = "osrs:underlay:";
 
 	private SceneMapper()
 	{
@@ -42,9 +44,9 @@ public final class SceneMapper
 	{
 		if (overlayId != 0)
 		{
-			return "osrs:overlay:" + (overlayId & 0xFFFF);
+			return OVERLAY + (overlayId & 0xFFFF);
 		}
-		return "osrs:underlay:" + (underlayId & 0xFFFF);
+		return UNDERLAY + (underlayId & 0xFFFF);
 	}
 
 	public static String objectMaterial(String name)

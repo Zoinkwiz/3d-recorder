@@ -29,7 +29,6 @@ dependencies {
 	annotationProcessor 'org.projectlombok:lombok:1.18.30'
 	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
 	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
-	testImplementation 'junit:junit:4.13.2'
 }
 
 group = 'com.extrinsiccognition'
@@ -55,4 +54,9 @@ tasks.register('run', JavaExec) {
 	}
 
 	args "--developer-mode", "--debug"
+}
+
+jar {
+	// The viewer's BSD notices travel with the plugin.
+	from(['LICENSE', 'THIRD-PARTY-NOTICES.md']) { into 'META-INF/3d-recorder' }
 }
