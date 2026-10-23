@@ -83,10 +83,23 @@ public interface EmbertideConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "recordInterface",
+		name = "Record the game interface",
+		description = "Also record what your interface shows, so Studio can draw it: your inventory and worn items, active prayers and spellbook, "
+			+ "the interface layout, and the chatbox's game messages, NPC dialogue and your own public chat. "
+			+ "Other players' chat and private, clan and friends chat are never read, and your bank is never read. Off until you turn it on.",
+		position = 7
+	)
+	default boolean recordInterface()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Record when you log in",
 		description = "Start recording when you log in. Turn off to start it yourself from the side panel.",
-		position = 7
+		position = 8
 	)
 	default boolean recordOnLogin()
 	{
@@ -97,7 +110,7 @@ public interface EmbertideConfig extends Config
 		keyName = "recordHotkey",
 		name = "Start or stop hotkey",
 		description = "A key that starts or stops recording, like the side panel's button. Not set unless you choose one.",
-		position = 7
+		position = 8
 	)
 	default Keybind recordHotkey()
 	{
@@ -108,7 +121,7 @@ public interface EmbertideConfig extends Config
 		keyName = "chunkMinutes",
 		name = "Minutes per file",
 		description = "Long sessions are saved as one file per this many minutes. Studio shows them as one recording.",
-		position = 8
+		position = 9
 	)
 	@Range(min = 1, max = 20)
 	default int chunkMinutes()
@@ -120,7 +133,7 @@ public interface EmbertideConfig extends Config
 		keyName = "openStudioOnLogout",
 		name = "Open Studio when you log out",
 		description = "Open Studio in your browser when you log out, ready for you to drag your recording in.",
-		position = 9
+		position = 10
 	)
 	default boolean openStudioOnLogout()
 	{

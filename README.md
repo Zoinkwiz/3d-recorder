@@ -97,11 +97,23 @@ Other players are recorded as unnamed figures, "Adventurer 1", "Adventurer 2"
 and so on. The plugin looks at their names only while you play, to keep each
 one's number the same and to tell your own chat from theirs. It never records
 their names, combat levels or chat, and never reads private, clan or friends
-chat. It doesn't read your inventory or
-bank, and it doesn't play for you.
+chat. It never reads your bank, and it doesn't play for you.
 
 You can turn off NPCs, other players, overhead text, your chat, and drops and
 milestones in the plugin's settings.
+
+**Record the game interface** is off until you turn it on. With it on, the
+plugin also records what your own interface shows, so Studio can draw it:
+
+- Your inventory and the items you wear.
+- Your active prayers and your spellbook.
+- How your interface is laid out: fixed or resizable, which side tab is open,
+  and the minimap zoom.
+- The chatbox's game messages, NPC dialogue and examine text, and your own
+  public chat if you record it.
+
+Even with it on, other players' chat and private, clan and friends chat are
+never read, and neither is your bank.
 
 ## Privacy
 

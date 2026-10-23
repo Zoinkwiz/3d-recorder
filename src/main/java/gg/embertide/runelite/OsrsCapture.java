@@ -20,6 +20,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import net.runelite.api.Actor;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.Constants;
 import net.runelite.api.DecorativeObject;
@@ -94,6 +95,8 @@ public final class OsrsCapture
 	// Camera rows land on every change, roughly ten a second while turning.
 	private static final int MAX_CAMERA = 4_000_000;
 	private static final int MAX_SPEECH = 600;
+	/** Chatbox lines kept a part, with Record the game interface on (3d-recorder#24). */
+	private static final int MAX_CHATBOX = 4000;
 	private static final double FIGHT_NOTE_GAP = 10;
 	private static final double NEAR_DEATH_GAP = 30;
 
@@ -128,6 +131,8 @@ public final class OsrsCapture
 	private Integer skyColor;
 	private final SceneSkybox sceneSkybox = new SceneSkybox();
 	private int skyboxCount;
+	private int chatboxCount;
+	private final InterfaceRows interfaceRows = new InterfaceRows();
 	private int environmentCount;
 	private int graphicCount;
 	private int projectileCount;
@@ -621,6 +626,26 @@ public final class OsrsCapture
 		return recording && !armed;
 	}
 
+	/** The player's interface rows that changed this tick, all of them as a part opens (3d-recorder#24). */
+	private void playerInterface(double t)
+	{
+		for (InterfaceRows.Row row : interfaceRows.changed(client))
+		{
+			row.payload.addProperty("dimension", session.dimension);
+			if (!emit(row.type, t, row.payload, PLAYER)) { return; }
+		}
+	}
+
+	/** A chatbox line, with Record the game interface on; only the kinds InterfaceRows keeps, never another player's. */
+	public void chatbox(ChatMessageType type, String name, String message, boolean own)
+	{
+		if (!acceptingEvents() || !config.recordInterface() || chatboxCount >= MAX_CHATBOX) { return; }
+		JsonObject line = InterfaceRows.chatLine(type, name, message, own, config.recordOwnChat());
+		if (line == null) { return; }
+		line.addProperty("dimension", session.dimension);
+		if (emit(InterfaceRows.CHATBOX, session.time(), line, PLAYER)) { chatboxCount++; }
+	}
+
 	/** Likeliest attacker of the player, or null if ambiguous. */
 	private Actor attacker(Player me)
 	{
@@ -1016,6 +1041,15 @@ public final class OsrsCapture
 			+ "npc_id the NPC type it is for or -1, boss true for the boss layout, markers its four marker lines (lower threshold, upper threshold, then two more) "
 			+ "each at hp = value - 1 and 0 for none, actor the recorded actor when it is the player's target or the only NPC of that type in the picture");
 		osrs.addProperty("baseline", "The static world is the cache's own map at cache_revision; recorded objects override it where they differ.");
+		if (config.recordInterface())
+		{
+			osrs.addProperty("interface", "The player's own interface, recorded because Record the game interface is on; each at its change and whole as a part opens: "
+				+ "osrs.inventory {items: 28 [item id, quantity], [-1, 0] empty}; osrs.equipment {slots: 14 [item id, quantity] by equipment slot}; "
+				+ "osrs.prayers {active: prayer names, quick: quick-prayers on}; osrs.spellbook {book: the SPELLBOOK varbit}; "
+				+ "osrs.interface {resizable, stones: RESIZABLE_STONE_ARRANGEMENT, panel: the open side tab (TOPLEVEL_PANEL), minimap_zoom}; "
+				+ "osrs.chatbox {kind: game|npc|examine|own, type, name for an NPC, text as the game sent it} for game messages, NPC dialogue, examines and the player's own public chat, "
+				+ "at most " + MAX_CHATBOX + " lines a part. Never the bank, other players' chat, or private, clan or friends chat.");
+		}
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
 		meta.addProperty("id", session.id);
@@ -1033,12 +1067,18 @@ public final class OsrsCapture
 			+ "Instanced areas include the loaded scene's corner heights on all planes. "
 			+ "Optional drops and milestones: loot received as item ids, quantities and Grand Exchange values, and a closed list of the game's own milestone messages "
 			+ "(kill counts, pets, collection log, clues, tasks and the like) reduced to their kind and numbers, never the message text. "
-			+ "Unloaded space, earlier history, other players' chat, private/clan/friends chat, inventories and actors on other planes are absent.");
+			+ (config.recordInterface()
+				? "The player's own interface (inventory, worn items, prayers, spellbook, layout and chatbox) is recorded; see osrs.interface. "
+					+ "Unloaded space, earlier history, other players' chat, private/clan/friends chat, the bank, other players' inventories and actors on other planes are absent."
+				: "Unloaded space, earlier history, other players' chat, private/clan/friends chat, inventories and actors on other planes are absent."));
 		header.add("session", meta);
 		JsonArray actorList = new JsonArray();
 		actorList.add(actorEntry(PLAYER, playerName, PLAYER_COLOR));
 		header.add("actors", actorList);
-		header.addProperty("channel_rule", "Local scene observations, optional own public chat and NPC overhead speech, optional drops and allowlisted milestone messages as structured fields only; other-player names and chat, private/clan/friends chat and account credentials are excluded; the account is named only by an opaque salted key.");
+		header.addProperty("channel_rule", "Local scene observations, optional own public chat and NPC overhead speech, optional drops and allowlisted milestone messages as structured fields only"
+			+ (config.recordInterface() ? ", and the player's own interface (inventory, worn items, prayers, spellbook, layout, chatbox game and NPC lines and own public chat)" : "")
+			+ "; other-player names and chat, private/clan/friends chat" + (config.recordInterface() ? ", the bank" : "")
+			+ " and account credentials are excluded; the account is named only by an opaque salted key.");
 		header.addProperty("clock", "ts is capture UTC + elapsed_s; elapsed_s is monotonic wall time, not game ticks. Equal-time records retain file order.");
 		return header;
 	}
@@ -1155,6 +1195,7 @@ public final class OsrsCapture
 		if (rediscover) { seedActors(view); }
 		vitals(t);
 		audio(t);
+		if (config.recordInterface()) { playerInterface(t); }
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{
 			region(view, t);
