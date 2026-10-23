@@ -97,7 +97,8 @@ Other players are recorded as unnamed figures, "Adventurer 1", "Adventurer 2"
 and so on. The plugin looks at their names only while you play, to keep each
 one's number the same and to tell your own chat from theirs. It never records
 their names, combat levels or chat, and never reads private, clan or friends
-chat. It never reads your bank, and it doesn't play for you.
+chat. It reads your bank only with Record the game interface on (below), and it
+doesn't play for you.
 
 You can turn off NPCs, other players, overhead text, your chat, and drops and
 milestones in the plugin's settings.
@@ -111,9 +112,15 @@ plugin also records what your own interface shows, so Studio can draw it:
   and the minimap zoom.
 - The chatbox's game messages, NPC dialogue and examine text, and your own
   public chat if you record it.
+- Every interface you have open, your bank included: shops, dialogues, skill
+  menus and the rest, as the game lays them out.
 
-Even with it on, other players' chat and private, clan and friends chat are
-never read, and neither is your bank.
+Even with it on, other players' names and chat and private, clan and friends
+chat are never recorded. Friends, ignore, chat channel, clan, trade, duel,
+group and party screens keep their layout without any text; anywhere else
+another player's name is replaced by their "Adventurer" number or left out,
+and your own name reads "You". What you type, the bank PIN screen and the
+login and welcome screens are never recorded.
 
 ## Privacy
 
@@ -122,6 +129,10 @@ The plugin doesn't connect to anything. It writes your recording to a
 part is saved. To watch, it reads only the recordings in that same folder,
 and the game's own models, which the client already has. It reads no other
 files. Your recordings stay on your computer unless you choose to share them.
+
+With **Record the game interface** on, a recording also holds your bank and
+every interface you open, so anyone you share it with sees them. Other
+players' names, what you type and the bank PIN are never in it.
 
 Studio runs in your browser and keeps the recording on your computer unless
 you make a share link. You don't need an account.

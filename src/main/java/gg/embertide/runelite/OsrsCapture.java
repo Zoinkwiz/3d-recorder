@@ -97,6 +97,8 @@ public final class OsrsCapture
 	private static final int MAX_SPEECH = 600;
 	/** Chatbox lines kept a part, with Record the game interface on (3d-recorder#24). */
 	private static final int MAX_CHATBOX = 4000;
+	/** osrs.widgets rows a part (3d-recorder#25); past it the part ends and the next opens whole. */
+	static final int MAX_WIDGET_ROWS = 20_000;
 	private static final double FIGHT_NOTE_GAP = 10;
 	private static final double NEAR_DEATH_GAP = 30;
 
@@ -133,6 +135,8 @@ public final class OsrsCapture
 	private int skyboxCount;
 	private int chatboxCount;
 	private final InterfaceRows interfaceRows = new InterfaceRows();
+	private final WidgetRows widgetRows = new WidgetRows();
+	private int widgetRowCount;
 	private int environmentCount;
 	private int graphicCount;
 	private int projectileCount;
@@ -634,6 +638,15 @@ public final class OsrsCapture
 			row.payload.addProperty("dimension", session.dimension);
 			if (!emit(row.type, t, row.payload, PLAYER)) { return; }
 		}
+		List<JsonObject> widgets = widgetRows.changed(client, this::pseudonym,
+			name -> pseudonyms.get(Text.removeTags(name).toLowerCase(Locale.ROOT)));
+		if (widgetRowCount + widgets.size() > MAX_WIDGET_ROWS) { stop("interface limit", true); return; }
+		for (JsonObject row : widgets)
+		{
+			row.addProperty("dimension", session.dimension);
+			if (!emit(WidgetRows.TYPE, t, row, PLAYER)) { return; }
+			widgetRowCount++;
+		}
 	}
 
 	/** A chatbox line, with Record the game interface on; only the kinds InterfaceRows keeps, never another player's. */
@@ -1048,7 +1061,22 @@ public final class OsrsCapture
 				+ "osrs.prayers {active: prayer names, quick: quick-prayers on}; osrs.spellbook {book: the SPELLBOOK varbit}; "
 				+ "osrs.interface {resizable, stones: RESIZABLE_STONE_ARRANGEMENT, panel: the open side tab (TOPLEVEL_PANEL), minimap_zoom}; "
 				+ "osrs.chatbox {kind: game|npc|examine|own, type, name for an NPC, text as the game sent it} for game messages, NPC dialogue, examines and the player's own public chat, "
-				+ "at most " + MAX_CHATBOX + " lines a part. Never the bank, other players' chat, or private, clan or friends chat.");
+				+ "at most " + MAX_CHATBOX + " lines a part. "
+				+ "osrs.widgets: every open interface, the bank included, drawn as the client laid it out. A row is {canvas: [width, height], resizable} when the "
+				+ "client's canvas changes, or one interface group: {group, whole: its first row in a part (then parent: the packed component it is mounted in "
+				+ "or -1 for the top level, mode: its modal mode, withheld: open only, nothing inside, no_text: its text left out, capped: cut at "
+				+ WidgetRows.MAX_STATIC + " components or " + WidgetRows.MAX_DYNAMIC + " script-made children), c: components, more: the group goes on in the "
+				+ "next row, closed: true when it closes}. A component is group:k[:d] {k: its index in the group, d: the index of a script-made child under "
+				+ "component k, gone: removed, type: widget type (written whole), parent: index of its parent in the group or -1, hidden: it or a parent is hidden, "
+				+ "at: [x, y, width, height] on the canvas after layout and scroll, color, alpha (0 opaque to 255 clear), filled, font, "
+				+ "align: [x, y, line height], shadow, sprite, tile, flip: [horizontal, vertical], item: [id, quantity, quantity mode], model: [id, type], "
+				+ "anim, zoom, rot: [x, y, z], text}; each field only on the types that draw it. In a whole entry an absent field is empty "
+				+ "(false, 0, -1 for parent, font, sprite, item, model and anim, \"\" for text); after it only changed fields appear. "
+				+ "Sprites, fonts and item icons come from the cache. At most " + WidgetRows.PER_ROW + " components a row, "
+				+ WidgetRows.ROWS_PER_TICK + " rows a tick, " + WidgetRows.MAX_TEXT + " characters of text, " + MAX_WIDGET_ROWS + " rows a part (interface limit). "
+				+ "Never written: the bank PIN, welcome, name entry and report screens, typed input, the chatbox and private chat (open only), "
+				+ "the text of friends, ignore, chat channel, clan, trade, duel, group ironman and party screens; elsewhere the player's own name reads You "
+				+ "and other players' names their Adventurer stand-in or nothing. Never other players' chat, or private, clan or friends chat.");
 		}
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();
@@ -1068,16 +1096,17 @@ public final class OsrsCapture
 			+ "Optional drops and milestones: loot received as item ids, quantities and Grand Exchange values, and a closed list of the game's own milestone messages "
 			+ "(kill counts, pets, collection log, clues, tasks and the like) reduced to their kind and numbers, never the message text. "
 			+ (config.recordInterface()
-				? "The player's own interface (inventory, worn items, prayers, spellbook, layout and chatbox) is recorded; see osrs.interface. "
-					+ "Unloaded space, earlier history, other players' chat, private/clan/friends chat, the bank, other players' inventories and actors on other planes are absent."
+				? "The player's own interface (inventory, worn items, prayers, spellbook, layout and chatbox) and every open interface, the bank included, are recorded; see osrs.interface. "
+					+ "Unloaded space, earlier history, other players' names and chat, private/clan/friends chat, the bank PIN, typed input, other players' inventories and actors on other planes are absent."
 				: "Unloaded space, earlier history, other players' chat, private/clan/friends chat, inventories and actors on other planes are absent."));
 		header.add("session", meta);
 		JsonArray actorList = new JsonArray();
 		actorList.add(actorEntry(PLAYER, playerName, PLAYER_COLOR));
 		header.add("actors", actorList);
 		header.addProperty("channel_rule", "Local scene observations, optional own public chat and NPC overhead speech, optional drops and allowlisted milestone messages as structured fields only"
-			+ (config.recordInterface() ? ", and the player's own interface (inventory, worn items, prayers, spellbook, layout, chatbox game and NPC lines and own public chat)" : "")
-			+ "; other-player names and chat, private/clan/friends chat" + (config.recordInterface() ? ", the bank" : "")
+			+ (config.recordInterface() ? ", and the player's own interface (inventory, worn items, prayers, spellbook, layout, chatbox game and NPC lines and own public chat) "
+				+ "and every open interface, the bank included, without other players' names, social screens' text or typed input" : "")
+			+ "; other-player names and chat, private/clan/friends chat" + (config.recordInterface() ? ", the bank PIN and login screens" : "")
 			+ " and account credentials are excluded; the account is named only by an opaque salted key.");
 		header.addProperty("clock", "ts is capture UTC + elapsed_s; elapsed_s is monotonic wall time, not game ticks. Equal-time records retain file order.");
 		return header;

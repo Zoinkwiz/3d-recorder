@@ -86,8 +86,9 @@ public interface EmbertideConfig extends Config
 		keyName = "recordInterface",
 		name = "Record the game interface",
 		description = "Also record what your interface shows, so Studio can draw it: your inventory and worn items, active prayers and spellbook, "
-			+ "the interface layout, and the chatbox's game messages, NPC dialogue and your own public chat. "
-			+ "Other players' chat and private, clan and friends chat are never read, and your bank is never read. Off until you turn it on.",
+			+ "the interface layout, every interface you open (the bank, shops, dialogues and the rest), and the chatbox's game messages, NPC dialogue "
+			+ "and your own public chat. Other players' names and chat, private, clan and friends chat, what you type, and the bank PIN and login screens "
+			+ "are never recorded. Off until you turn it on.",
 		position = 7
 	)
 	default boolean recordInterface()
