@@ -3,8 +3,9 @@
 Records your session as a 3D replay. Afterwards you can fly a camera round
 it from any angle, change the look, and cut clips of your play, either in
 your browser at [embertide.gg/studio](https://embertide.gg/studio/) or in
-the Embertide app. No account needed for the browser version. You can also
-watch a recording inside the game, in your player-owned house.
+the [Embertide](https://embertide.gg/) app. No account needed for the browser
+version. You can also watch a recording inside the game, in your player-owned
+house. See [what Embertide does for Old School RuneScape](https://embertide.gg/games/old-school-runescape).
 
 View your recordings:
 
