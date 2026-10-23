@@ -655,6 +655,9 @@ public final class OsrsCapture
 		if (!acceptingEvents() || !config.recordInterface() || chatboxCount >= MAX_CHATBOX) { return; }
 		JsonObject line = InterfaceRows.chatLine(type, name, message, own, config.recordOwnChat());
 		if (line == null) { return; }
+		// A game message or an NPC's line can name a player: the player's own name reads You, others their stand-in or nothing.
+		line.addProperty("text", widgetRows.scrubLine(client, line.get("text").getAsString(), this::pseudonym,
+			known -> pseudonyms.get(Text.removeTags(known).toLowerCase(Locale.ROOT))));
 		line.addProperty("dimension", session.dimension);
 		if (emit(InterfaceRows.CHATBOX, session.time(), line, PLAYER)) { chatboxCount++; }
 	}
@@ -1060,7 +1063,7 @@ public final class OsrsCapture
 				+ "osrs.inventory {items: 28 [item id, quantity], [-1, 0] empty}; osrs.equipment {slots: 14 [item id, quantity] by equipment slot}; "
 				+ "osrs.prayers {active: prayer names, quick: quick-prayers on}; osrs.spellbook {book: the SPELLBOOK varbit}; "
 				+ "osrs.interface {resizable, stones: RESIZABLE_STONE_ARRANGEMENT, panel: the open side tab (TOPLEVEL_PANEL), minimap_zoom}; "
-				+ "osrs.chatbox {kind: game|npc|examine|own, type, name for an NPC, text as the game sent it} for game messages, NPC dialogue, examines and the player's own public chat, "
+				+ "osrs.chatbox {kind: game|npc|examine|own, type, name for an NPC, text as the game sent it, a player's name in it replaced as in osrs.widgets} for game messages, NPC dialogue, examines and the player's own public chat, "
 				+ "at most " + MAX_CHATBOX + " lines a part. "
 				+ "osrs.widgets: every open interface, the bank included, drawn as the client laid it out. A row is {canvas: [width, height], resizable, rel: true, positions are relative} when the "
 				+ "client's canvas changes, or one interface group: {group, whole: its first row in a part (then parent: the packed component it is mounted in "

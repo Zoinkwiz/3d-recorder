@@ -381,6 +381,19 @@ final class WidgetRows
 	/** The text with every known player's name replaced, the player's own by "You"; cut to MAX_TEXT characters. */
 	String scrub(Client client, String text, Function<String, String> standIn, Function<String, String> known)
 	{
+		String out = unname(client, text, standIn, known);
+		return out.length() > MAX_TEXT ? out.substring(0, MAX_TEXT) : out;
+	}
+
+	/** A chatbox line with names replaced as scrub does, from a fresh look at who the client knows of, and not cut. */
+	String scrubLine(Client client, String text, Function<String, String> standIn, Function<String, String> known)
+	{
+		names = null;
+		return unname(client, text, standIn, known);
+	}
+
+	private String unname(Client client, String text, Function<String, String> standIn, Function<String, String> known)
+	{
 		if (names == null) { names = names(client, standIn, known); }
 		StringBuilder out = new StringBuilder(text.length());
 		String norm = normal(text);
@@ -401,7 +414,7 @@ final class WidgetRows
 			if (end < 0) { out.append(text.charAt(i++)); }
 			else { out.append(to); i = end; }
 		}
-		return out.length() > MAX_TEXT ? out.substring(0, MAX_TEXT) : out.toString();
+		return out.toString();
 	}
 
 	private static boolean word(String s, int i)

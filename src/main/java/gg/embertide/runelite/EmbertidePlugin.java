@@ -450,8 +450,8 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		// The chatbox as the game showed it, with Record the game interface on (3d-recorder#24); kinds are filtered there.
-		current.chatbox(event.getType(), Text.removeTags(event.getName()), event.getMessage(),
-			event.getName() != null && Text.removeTags(event.getName()).equalsIgnoreCase(Text.removeTags(me.getName())));
+		String sender = event.getName() == null ? "" : Text.removeTags(event.getName());
+		current.chatbox(event.getType(), sender, event.getMessage(), me.getName() != null && sender.equalsIgnoreCase(Text.removeTags(me.getName())));
 		if (event.getType() == ChatMessageType.GAMEMESSAGE || event.getType() == ChatMessageType.SPAM)
 		{
 			// Allowlisted kinds only.
