@@ -20,7 +20,7 @@ repositories {
 }
 
 def runeLiteVersion = findProperty('runeliteVersion') ?: 'latest.release'
-def pluginMainClass = 'com.extrinsiccognition.embertide.EmbertidePluginTest'
+def pluginMainClass = 'gg.embertide.runelite.EmbertidePluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
@@ -31,7 +31,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
 }
 
-group = 'com.extrinsiccognition'
+group = 'gg.embertide'
 version = '0.5.0'
 
 tasks.withType(JavaCompile).configureEach {
