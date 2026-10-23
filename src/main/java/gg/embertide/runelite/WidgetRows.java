@@ -16,7 +16,6 @@ import net.runelite.api.Client;
 import net.runelite.api.NameableContainer;
 import net.runelite.api.Nameable;
 import net.runelite.api.Player;
-import net.runelite.api.Point;
 import net.runelite.api.WidgetNode;
 import net.runelite.api.WorldView;
 import net.runelite.api.clan.ClanChannel;
@@ -31,6 +30,7 @@ import net.runelite.api.widgets.WidgetType;
 /**
  * Every open interface, the bank included, as osrs.widgets rows (3d-recorder#25), with Record the game interface on.
  * A group's first row in a part is whole; after that a row carries only what scripts changed.
+ * Positions are relative to the parent's content, as the client lays them out, so scrolling the bank writes one scroll, not every item.
  * Privacy: the PIN, welcome, name entry and report screens are never read; the chatbox and private chat are written
  * as open only (osrs.chatbox keeps the allowed lines); social screens keep their layout with no text; typed input is
  * never written; anywhere else the player's own name reads "You" and any other player the client knows of (nearby,
@@ -64,16 +64,21 @@ final class WidgetRows
 
 	private static final int KIND = 0, PARENT = 1, HIDDEN = 2, X = 3, Y = 4, W = 5, H = 6, COLOR = 7, ALPHA = 8, FILLED = 9, FONT = 10,
 		ALIGN_X = 11, ALIGN_Y = 12, LINE_H = 13, SHADOW = 14, SPRITE = 15, TILE = 16, FLIP_H = 17, FLIP_V = 18, ITEM = 19, QTY = 20, QTY_MODE = 21,
-		MODEL_TYPE = 22, MODEL = 23, ANIM = 24, ZOOM = 25, ROT_X = 26, ROT_Y = 27, ROT_Z = 28, SLOTS = 29;
+		MODEL_TYPE = 22, MODEL = 23, ANIM = 24, ZOOM = 25, ROT_X = 26, ROT_Y = 27, ROT_Z = 28, SCROLL_X = 29, SCROLL_Y = 30, SCROLLABLE = 31,
+		SLOTS = 32;
 	private static final int TEXTS = 1 << WidgetType.TEXT | 1 << WidgetType.IF1_TOOLTIP, ALL = -1;
 
-	/** A written field: its key, its slots (one is a number or flag, more an array), its first slot's empty value (the rest 0), the types it draws on. */
+	/**
+	 * A written field: its key, its slots (one is a number or flag, more an array), its first slot's empty value (the rest 0), the types it draws on;
+	 * a gated field is written whole only where its gate slot is 1.
+	 */
 	private static final class Field
 	{
 		final String key;
 		final int[] slots;
 		final int empty, types;
 		final boolean flag;
+		int gate = -1;
 
 		Field(String key, int empty, int types, boolean flag, int... slots)
 		{
@@ -82,6 +87,12 @@ final class WidgetRows
 			this.types = types;
 			this.flag = flag;
 			this.slots = slots;
+		}
+
+		Field gate(int slot)
+		{
+			gate = slot;
+			return this;
 		}
 	}
 
@@ -103,6 +114,7 @@ final class WidgetRows
 		new Field("anim", -1, 1 << WidgetType.MODEL, false, ANIM),
 		new Field("zoom", 0, 1 << WidgetType.MODEL, false, ZOOM),
 		new Field("rot", 0, 1 << WidgetType.MODEL, false, ROT_X, ROT_Y, ROT_Z),
+		new Field("scroll", 0, 1 << WidgetType.LAYER, false, SCROLL_X, SCROLL_Y).gate(SCROLLABLE),
 	};
 
 	/** One component as last written; text is the client's own string, so an unchanged one compares by reference. */
@@ -160,6 +172,7 @@ final class WidgetRows
 			JsonObject row = new JsonObject();
 			row.add("canvas", ints(screen[0], screen[1]));
 			row.addProperty("resizable", screen[2] == 1);
+			row.addProperty("rel", true);
 			rows.add(row);
 		}
 		for (Integer g : new ArrayList<>(groups.keySet()))
@@ -290,7 +303,7 @@ final class WidgetRows
 			for (int i = 0; i < f.slots.length; i++)
 			{
 				int slot = f.slots[i];
-				write |= all ? f.empty == Integer.MIN_VALUE || v[slot] != (i == 0 ? f.empty : 0) : v[slot] != old.v[slot];
+				write |= !all ? v[slot] != old.v[slot] : f.gate >= 0 ? v[f.gate] == 1 : f.empty == Integer.MIN_VALUE || v[slot] != (i == 0 ? f.empty : 0);
 			}
 			if (!write) { continue; }
 			if (f.flag) { e.addProperty(f.key, v[f.slots[0]] == 1); }
@@ -309,14 +322,20 @@ final class WidgetRows
 		if (e.size() > before) { found.add(e); }
 	}
 
-	/** What the component draws, read only for the types that draw it; typed input (INPUT_FIELD) is never read. */
+	/**
+	 * What the component draws, read only for the types that draw it; typed input (INPUT_FIELD) is never read.
+	 * The position is the client's laid-out one, relative to the parent's content origin, so a scroll moves no child.
+	 */
 	private static void read(Widget w, int type, int[] v)
 	{
-		Point p = w.getCanvasLocation();
-		v[X] = p == null ? w.getRelativeX() : p.getX();
-		v[Y] = p == null ? w.getRelativeY() : p.getY();
+		v[X] = w.getRelativeX();
+		v[Y] = w.getRelativeY();
 		v[W] = w.getWidth();
 		v[H] = w.getHeight();
+		boolean layer = type == WidgetType.LAYER;
+		v[SCROLL_X] = layer ? w.getScrollX() : 0;
+		v[SCROLL_Y] = layer ? w.getScrollY() : 0;
+		v[SCROLLABLE] = layer && (w.getScrollWidth() > v[W] || w.getScrollHeight() > v[H] || v[SCROLL_X] != 0 || v[SCROLL_Y] != 0) ? 1 : 0;
 		boolean text = (TEXTS >> type & 1) == 1, inventory = type == WidgetType.TEXT_INVENTORY;
 		boolean graphic = type == WidgetType.GRAPHIC, model = type == WidgetType.MODEL, rect = type == WidgetType.RECTANGLE;
 		v[COLOR] = text || inventory || rect || type == WidgetType.LINE ? w.getTextColor() : 0;
