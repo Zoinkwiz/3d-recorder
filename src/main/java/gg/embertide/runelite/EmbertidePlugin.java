@@ -74,6 +74,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.Filepath;
 import net.runelite.client.util.HotkeyListener;
 import net.runelite.client.util.Text;
@@ -145,6 +146,9 @@ public class EmbertidePlugin extends Plugin
 	private ItemManager itemManager;
 	@Inject
 	private KeyManager keyManager;
+	@Inject
+	private OverlayManager overlayManager;
+	private final RecordingLight light = new RecordingLight(this::lightShown);
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -203,6 +207,7 @@ public class EmbertidePlugin extends Plugin
 		viewer.startUp();
 		eventBus.register(viewer);
 		keyManager.registerKeyListener(hotkey);
+		overlayManager.add(light);
 		prepareFolder();
 		int generation = ++uiGeneration;
 		SwingUtilities.invokeLater(() ->
@@ -229,6 +234,7 @@ public class EmbertidePlugin extends Plugin
 		enabled = false;
 		continuing = false;
 		keyManager.unregisterKeyListener(hotkey);
+		overlayManager.remove(light);
 		++uiGeneration;
 		EmbertidePanel closingPanel = panel;
 		NavigationButton closingButton = navigationButton;
@@ -750,6 +756,12 @@ public class EmbertidePlugin extends Plugin
 		boolean recording = current.recording();
 		String headline = recording ? "Recording · " + clock(earlier + current.seconds()) : "Not recording";
 		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade());
+	}
+
+	private boolean lightShown()
+	{
+		OsrsCapture current = capture;
+		return config.recordingLight() && current != null && current.recording();
 	}
 
 	/** The player's answer to the panel's question: record at every login, or only after Start. Asked once. */

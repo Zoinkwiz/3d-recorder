@@ -148,6 +148,17 @@ public interface EmbertideConfig extends Config
 		return false;
 	}
 
+	@ConfigItem(
+		keyName = "recordingLight",
+		name = "Show a recording light",
+		description = "Show a small red light and REC on the game screen while recording. Hold Alt to drag it somewhere else.",
+		position = 10
+	)
+	default boolean recordingLight()
+	{
+		return true;
+	}
+
 	@ConfigItem(keyName = "viewerWidth", name = "Miniature width", description = "How many tiles wide a miniature is.", position = 11, section = WATCH)
 	@Range(min = 2, max = 12)
 	default int viewerWidth()
