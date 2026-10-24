@@ -187,7 +187,7 @@ public final class OsrsCapture
 	private double lastNearDeathAt = -60;
 	private int momentCount;
 	private int hitCount;
-	private int[] lastCamera;
+	private double[] lastCamera;
 	private int[] lastVitals;
 	private int[] lastAudio;
 	/** Per actor, the head icons last written: prayer, skull, then archive and sprite pairs. */
@@ -1032,7 +1032,7 @@ public final class OsrsCapture
 			+ "osrs.ground_items [x, y, plane, id, quantity], scope scene (replacing the box it names), baseline, spawned or despawned; "
 			+ "osrs.appearance for players; every player.position carries osrs.{npc_id, orientation, animation, pose_animation, animation_frame, graphic}; "
 			+ "osrs.motion on the 20 ms client tick with the visible state of nearby actors as [id, x, y, plane, orientation, animation, frame, pose_animation], x and y in fractional tiles, only when changed; "
-			+ "osrs.camera independently sampled as [x, y, height, yaw, pitch, scale, viewport_width, viewport_height]; "
+			+ "osrs.camera independently sampled as [x, y, height, yaw, pitch, scale, viewport_width, viewport_height], from the camera the game is drawn with (the floating-point one under a GPU renderer), yaw and pitch in 2048 units a turn; "
 			+ "osrs.poses batches game-tick poses including slot, appearance and animation fields; osrs.hit and osrs.death for enabled actor categories; "
 			+ "osrs.scene_loaded once the whole scene is written on a scene load, the same tick; osrs.game_state on login state changes; "
 			+ "osrs.region includes instance_template_chunks; osrs.instance_heights stores each plane's actual scene corner heights for instanced cache reconstruction; "
@@ -1133,28 +1133,34 @@ public final class OsrsCapture
 			stop("camera limit", true);
 			return;
 		}
-		int x = client.getCameraX(), y = client.getCameraY(), z = client.getCameraZ();
-		int yaw = client.getCameraYaw(), pitch = client.getCameraPitch(), scale = client.getScale();
+		// A GPU renderer (the GPU plugin, 117 HD) draws from the floating-point camera, whose angles are radians;
+		// the CPU renderer from the whole-number one, 16384 units a turn. Both are written in 2048 units a turn.
+		boolean gpu = client.isGpu() && Float.isFinite(client.getCameraFpX()) && Float.isFinite(client.getCameraFpYaw());
+		double x = gpu ? client.getCameraFpX() : client.getCameraX();
+		double y = gpu ? client.getCameraFpY() : client.getCameraY();
+		double z = gpu ? client.getCameraFpZ() : client.getCameraZ();
+		double yaw = gpu ? turnUnits(client.getCameraFpYaw()) : client.getCameraYaw() / 8.0;
+		double pitch = gpu ? turnUnits(client.getCameraFpPitch()) : client.getCameraPitch() / 8.0;
+		int scale = client.getScale();
 		int width = client.getViewportWidth(), height = client.getViewportHeight();
 		int baseX = view.getBaseX(), baseY = view.getBaseY();
 		if (scale <= 0 || (x == 0 && y == 0 && z == 0))
 		{
 			return;
 		}
-		int[] last = lastCamera;
-		if (last != null && last[0] == x && last[1] == y && last[2] == z && last[3] == yaw && last[4] == pitch
-			&& last[5] == scale && last[6] == width && last[7] == height && last[8] == baseX && last[9] == baseY)
+		double[] now = {milli(x), milli(y), milli(z), milli(yaw), milli(pitch), scale, width, height, baseX, baseY};
+		if (Arrays.equals(now, lastCamera))
 		{
 			return;
 		}
-		lastCamera = new int[]{x, y, z, yaw, pitch, scale, width, height, baseX, baseY};
+		lastCamera = now;
 		JsonArray sample = new JsonArray(8);
-		// Client camera Y is north and Z height, downward-positive; yaw and pitch go from 16384 to 2048 units a turn.
-		sample.add(tiles(baseX, x));
-		sample.add(tiles(baseY, y));
-		sample.add(-z);
-		sample.add(milli(yaw / 8.0));
-		sample.add(milli(pitch / 8.0));
+		// Client camera Y is north and Z height, downward-positive.
+		sample.add(milli(baseX + x / SceneMapper.LOCAL_TILE_SIZE));
+		sample.add(milli(baseY + y / SceneMapper.LOCAL_TILE_SIZE));
+		if (gpu) { sample.add(milli(-z)); } else { sample.add((int) -z); }
+		sample.add(milli(yaw));
+		sample.add(milli(pitch));
 		sample.add(scale);
 		sample.add(width);
 		sample.add(height);
@@ -1514,6 +1520,13 @@ public final class OsrsCapture
 	private static double tiles(int base, int local)
 	{
 		return milli(base + local / (double) SceneMapper.LOCAL_TILE_SIZE);
+	}
+
+	/** Radians as 2048 units a turn, from 0 up to 2048. */
+	static double turnUnits(double radians)
+	{
+		double units = radians * 2048.0 / (2 * Math.PI) % 2048.0;
+		return units < 0 ? units + 2048.0 : units;
 	}
 
 	private static double milli(double value)
