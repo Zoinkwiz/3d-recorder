@@ -234,6 +234,22 @@ final class WidgetRows
 		return rows;
 	}
 
+	/** Whether a never-read screen (the bank PIN, name entry, reports) is open now. */
+	static boolean secretOpen(Client client)
+	{
+		if (SECRET.contains(client.getTopLevelInterfaceId())) { return true; }
+		Iterable<WidgetNode> table = client.getComponentTable();
+		if (table == null) { return false; }
+		for (WidgetNode node : table) { if (SECRET.contains(node.getId())) { return true; } }
+		return false;
+	}
+
+	/** Whether a group's text may name players the client does not know of: the chatbox, private chat and social screens. */
+	static boolean namesUnknownPlayers(int group)
+	{
+		return OPEN_ONLY.contains(group) || NO_TEXT.contains(group) || SECRET.contains(group);
+	}
+
 	/** True for a never-read group or one mounted, at any depth, inside one. */
 	private static boolean secret(int group, Map<Integer, int[]> open, int depth)
 	{

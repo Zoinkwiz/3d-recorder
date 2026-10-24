@@ -35,6 +35,8 @@ import net.runelite.api.NPCComposition;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
+import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.Point;
 import net.runelite.api.Preferences;
 import net.runelite.api.Projectile;
@@ -53,6 +55,7 @@ import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
@@ -140,6 +143,7 @@ public final class OsrsCapture
 	private int environmentCount;
 	private int graphicCount;
 	private int projectileCount;
+	private int clickCount;
 	private int soundCount;
 	/** Projectiles already written: RuneLite reports each one on every frame it moves. */
 	private final Map<Projectile, Boolean> projectilesSeen = new WeakHashMap<>();
@@ -649,6 +653,41 @@ public final class OsrsCapture
 		}
 	}
 
+	/**
+	 * A menu option the player chose, with Record your clicks on: what it was, on what, where on the canvas, and the game tick
+	 * and client cycle. Never typed text; nothing while the bank PIN or another never-read screen is open. A player is named
+	 * only by their recorded figure, and a target inside the chatbox, private chat or a social screen is left out.
+	 */
+	public void click(MenuEntry entry, Player me)
+	{
+		if (!acceptingEvents() || !config.recordClicks() || entry == null || clickCount >= MAX_EVENTS || WidgetRows.secretOpen(client)) { return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("option", Text.removeTags(entry.getOption() == null ? "" : entry.getOption()));
+		MenuAction type = entry.getType();
+		payload.addProperty("action", type == null ? "unknown" : type.name().toLowerCase(Locale.ROOT));
+		Actor actor = entry.getActor();
+		String actorId = eventId(actor, me);
+		if (actorId != null) { payload.addProperty("actor", actorId); }
+		Widget widget = entry.getWidget();
+		int group = widget == null ? -1 : widget.getId() >>> 16;
+		if (group >= 0) { payload.addProperty("group", group); }
+		String target = entry.getTarget() == null ? "" : Text.removeTags(entry.getTarget()).trim();
+		if (!(actor instanceof Player) && !WidgetRows.namesUnknownPlayers(group) && !target.isEmpty())
+		{
+			payload.addProperty("target", widgetRows.scrubLine(client, target, this::pseudonym,
+				known -> pseudonyms.get(Text.removeTags(known).toLowerCase(Locale.ROOT))));
+		}
+		if (entry.getItemId() > 0) { payload.addProperty("item", entry.getItemId()); }
+		if (type != null && type.name().startsWith("GAME_OBJECT")) { payload.addProperty("object", entry.getIdentifier()); }
+		Point mouse = client.getMouseCanvasPosition();
+		if (mouse != null) { payload.add("at", ints(new int[]{mouse.getX(), mouse.getY()})); }
+		payload.addProperty("panel", client.getVarcIntValue(VarClientID.TOPLEVEL_PANEL));
+		payload.addProperty("tick", client.getTickCount());
+		payload.addProperty("cycle", client.getGameCycle());
+		payload.addProperty("dimension", session.dimension);
+		if (emit("osrs.click", session.time(), payload, PLAYER)) { clickCount++; }
+	}
+
 	/** A chatbox line, with Record the game interface on; only the kinds InterfaceRows keeps, never another player's. */
 	public void chatbox(ChatMessageType type, String name, String message, boolean own)
 	{
@@ -1082,6 +1121,14 @@ public final class OsrsCapture
 				+ "Never written: the bank PIN, welcome, name entry and report screens, typed input, the chatbox and private chat (open only), "
 				+ "the text of friends, ignore, chat channel, clan, trade, duel, group ironman and party screens; elsewhere the player's own name reads You "
 				+ "and other players' names their Adventurer stand-in or nothing. Never other players' chat, or private, clan or friends chat.");
+		}
+		if (config.recordClicks())
+		{
+			osrs.addProperty("clicks", "Recorded because Record your clicks is on: osrs.click for each menu option the player chose, {option, action: the menu action type, "
+				+ "actor: the recorded figure it was on, target: the menu's target text without tags, group: the interface group clicked in, item, object: the object id, "
+				+ "at: [x, y] on the canvas, panel: the open side tab, tick: the game tick, cycle: the client cycle}, at most " + MAX_EVENTS + " a part. "
+				+ "Never typed text, and nothing while the bank PIN, name entry or report screens are open; a player is named only by their figure, "
+				+ "and a target inside the chatbox, private chat or a social screen is left out.");
 		}
 		header.add("osrs", osrs);
 		JsonObject meta = new JsonObject();

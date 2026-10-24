@@ -39,6 +39,7 @@ import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.ProjectileMoved;
 import net.runelite.api.events.SoundEffectPlayed;
 import net.runelite.api.events.AreaSoundEffectPlayed;
@@ -438,6 +439,14 @@ public class EmbertidePlugin extends Plugin
 			return;
 		}
 		current.actorDied(event.getActor(), client.getLocalPlayer());
+	}
+
+	@Subscribe
+	public void onMenuOptionClicked(MenuOptionClicked event)
+	{
+		OsrsCapture current = capture;
+		if (current == null || rediscover) { return; }
+		current.click(event.getMenuEntry(), client.getLocalPlayer());
 	}
 
 	@Subscribe

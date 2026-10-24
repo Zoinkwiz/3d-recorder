@@ -97,6 +97,18 @@ public interface EmbertideConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "recordClicks",
+		name = "Record your clicks",
+		description = "Also record each menu option you choose: what it was, on what, where you clicked on the game screen, and the game tick, "
+			+ "so Studio can show your clicks. Never what you type, other players' names, or anything while the bank PIN is open. Off until you turn it on.",
+		position = 7
+	)
+	default boolean recordClicks()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Record when you log in",
 		description = "Start recording when you log in. Turn off to start it yourself from the side panel.",
