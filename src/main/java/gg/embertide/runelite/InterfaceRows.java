@@ -18,7 +18,7 @@ import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarbitID;
 
 /**
- * The player's own interface, recorded only with Record the game interface on (3d-recorder#24): each row at its change,
+ * The player's own interface, recorded only with Record the game interface on: each row at its change,
  * and whole when a part opens, since a part starts with nothing written. Never anyone else's; the bank and other open interfaces are WidgetRows.
  */
 final class InterfaceRows

@@ -68,9 +68,8 @@ press **Clear**, leave the house or log out. It works with RuneLite's GPU
 plugin and 117 HD; with other renderers the panel says so, and you can untick
 it to watch with the house showing.
 
-Recordings made with this version save the ground as you saw it. Older ones
-show the floor only near where you walked, or no floor at all, and the panel
-says which.
+A recording saves the ground as you saw it. If one holds the floor only near
+where you walked, or no floor at all, the panel says which.
 
 ## What is recorded
 

@@ -1,5 +1,4 @@
-# EC shared text policy. Every managed repository tracks its own copy.
-# Repository-specific overrides belong after this shared base block.
+# Line endings: LF everywhere, CRLF only for Windows command scripts.
 * text=auto eol=lf
 
 # Windows command scripts are the only text files kept as CRLF by default.
@@ -82,9 +81,7 @@
 # `git diff --check` consistent with that policy.
 *.md whitespace=-blank-at-eol
 
-# Office documents are binary containers (zipped XML). Without this, the text
-# hygiene gate reads their NUL bytes and fails, and git would try to normalise
-# line endings inside the archive and corrupt it.
+# Office documents are zipped XML: keep Git from normalising line endings inside them.
 *.pptx binary
 *.docx binary
 *.xlsx binary

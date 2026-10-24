@@ -95,9 +95,9 @@ public final class OsrsCapture
 	// Camera rows land on every change, roughly ten a second while turning.
 	private static final int MAX_CAMERA = 4_000_000;
 	private static final int MAX_SPEECH = 600;
-	/** Chatbox lines kept a part, with Record the game interface on (3d-recorder#24). */
+	/** Chatbox lines kept a part, with Record the game interface on. */
 	private static final int MAX_CHATBOX = 4000;
-	/** osrs.widgets rows a part (3d-recorder#25); past it the part ends and the next opens whole. */
+	/** osrs.widgets rows a part; past it the part ends and the next opens whole. */
 	static final int MAX_WIDGET_ROWS = 20_000;
 	private static final double FIGHT_NOTE_GAP = 10;
 	private static final double NEAR_DEATH_GAP = 30;
@@ -630,7 +630,7 @@ public final class OsrsCapture
 		return recording && !armed;
 	}
 
-	/** The player's interface rows that changed this tick, all of them as a part opens (3d-recorder#24). */
+	/** The player's interface rows that changed this tick, all of them as a part opens. */
 	private void playerInterface(double t)
 	{
 		for (InterfaceRows.Row row : interfaceRows.changed(client))
@@ -965,8 +965,7 @@ public final class OsrsCapture
 		for (NPC npc : view.npcs()) { actorSpawned(npc); }
 		for (Player player : view.players()) { actorSpawned(player); }
 		// The crew of a Sailing boat live in the boat's own world view, not the map's, and a scene load
-		// does not spawn them again: seeded only from the map's lists they were never present, and were
-		// drawn only while they spoke (3d-recorder#14).
+		// does not spawn them again, so they are seeded from each boat's view.
 		if (boats)
 		{
 			for (WorldEntity entity : view.worldEntities())
@@ -991,7 +990,7 @@ public final class OsrsCapture
 		header.addProperty("type", RowTypes.HEADER);
 		header.addProperty("format", MccrSession.FORMAT);
 		header.addProperty("profile", MccrSession.PROFILE);
-		header.addProperty("schema", "CorePercept envelope + ec.mccr.spatial/1 + " + OSRS_PROFILE);
+		header.addProperty("schema", "MCCR rows + ec.mccr.spatial/1 + " + OSRS_PROFILE);
 		header.addProperty("game", MccrSession.GAME);
 		if (account != null)
 		{
@@ -1624,8 +1623,7 @@ public final class OsrsCapture
 	/**
 	 * The Sailing boat an actor stands on, or null on land. On a boat the client
 	 * reports the actor in the boat's own world view, whose tiles sit far off the
-	 * map (x near 15000); the boat's world entity places that view on the map
-	 * (3d-recorder#5).
+	 * map (x near 15000); the boat's world entity places that view on the map.
 	 */
 	private WorldEntity boatOf(Actor actor)
 	{

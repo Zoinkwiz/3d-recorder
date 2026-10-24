@@ -28,7 +28,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetType;
 
 /**
- * Every open interface, the bank included, as osrs.widgets rows (3d-recorder#25), with Record the game interface on.
+ * Every open interface, the bank included, as osrs.widgets rows, with Record the game interface on.
  * A group's first row in a part is whole; after that a row carries only what scripts changed.
  * Positions are relative to the parent's content, as the client lays them out, so scrolling the bank writes one scroll, not every item.
  * Privacy: the PIN, welcome, name entry and report screens are never read; the chatbox and private chat are written

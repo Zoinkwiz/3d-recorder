@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The ground a recording saved: its osrs.ground rows, keyed by world tile and map plane, or for older recordings a floor
+ * The ground a recording saved: its osrs.ground rows, keyed by world tile and map plane, or for a recording without them a floor
  * SnapshotTerrain builds once from snapshot cells on the client thread. Otherwise immutable during playback.
  * Each scene load the recorder wrote replaces the tiles it covered.
  */
@@ -15,7 +15,7 @@ final class Terrain implements GroundRows.Sink
 	static final int MAX_TILES = 600_000, MAX_BLOCKS = 1024;
 	boolean instance;
 	int baseX, baseY;
-	/** Heights written for old instance recordings, before ground rows; [plane][scene x][scene y]. */
+	/** An instance's corner heights from its osrs.instance_heights row, for a recording without ground rows; [plane][scene x][scene y]. */
 	final int[][][] instanceHeights = new int[4][][];
 	private final Map<Long, Block> blocks = new HashMap<>();
 	private int tiles;
@@ -24,7 +24,7 @@ final class Terrain implements GroundRows.Sink
 
 	/** Whether this scene has ground: osrs.ground rows, or a floor built from snapshot cells. */
 	boolean recorded() { return !blocks.isEmpty(); }
-	/** The floor was built from spatial snapshot cells (a recording made before osrs.ground rows), or that was tried. */
+	/** The floor was built from spatial snapshot cells (a recording without osrs.ground rows), or that was tried. */
 	boolean sampled;
 
 	@Override

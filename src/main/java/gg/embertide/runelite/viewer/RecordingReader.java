@@ -31,7 +31,7 @@ final class RecordingReader
 	static final int MAX_LINE = 2 * 1024 * 1024;
 	static final long MAX_GROUND_VALUES = 40_000_000;
 	static final int MAX_SCENE_OBJECTS = 100_000, MAX_OBJECTS = 2_000_000;
-	private static final String LEGACY_GROUND = "osrs:ground";
+	private static final String PLAIN_GROUND = "osrs:ground";
 	private int samples, cells, objects, actors, appearances, terrainValues;
 	private long groundValues;
 	private boolean deltaMotion;
@@ -302,7 +302,7 @@ final class RecordingReader
 			(int) num(a, 4), (int) num(a, 5), (int) num(a, 6), (int) num(a, 7), -1));
 	}
 
-	/** A ground cell (x, plane * 8 + elevation, -y) as SceneMapper writes it; osrs:ground is an older recorder's. */
+	/** A ground cell (x, plane * 8 + elevation, -y) as SceneMapper writes it; osrs:ground is a cell with no underlay or overlay id. */
 	private void cell(Scene s, JsonArray a) throws IOException
 	{
 		if (a.size() < 4)
@@ -310,12 +310,12 @@ final class RecordingReader
 			throw new IllegalArgumentException("Short ground cell");
 		}
 		String material = a.get(3).getAsString();
-		boolean legacy = LEGACY_GROUND.equals(material);
-		if (!legacy && !material.startsWith(SceneMapper.UNDERLAY) && !material.startsWith(SceneMapper.OVERLAY))
+		boolean plain = PLAIN_GROUND.equals(material);
+		if (!plain && !material.startsWith(SceneMapper.UNDERLAY) && !material.startsWith(SceneMapper.OVERLAY))
 		{
 			return;
 		}
-		if (!legacy)
+		if (!plain)
 		{
 			int materialId = Integer.parseInt(material.substring(material.lastIndexOf(':') + 1));
 			if (materialId < 0 || materialId > 65535)

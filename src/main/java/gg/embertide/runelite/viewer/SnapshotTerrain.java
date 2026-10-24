@@ -7,7 +7,7 @@ import static gg.embertide.runelite.SceneMapper.OVERLAY;
 import static gg.embertide.runelite.SceneMapper.UNDERLAY;
 
 /**
- * Floor for a scene recorded before osrs.ground rows: its spatial snapshot cells, which name each tile's underlay or
+ * Floor for a scene with no osrs.ground rows: its spatial snapshot cells, which name each tile's underlay or
  * overlay near where the player walked, coloured from the client's own definitions the way the client colours a
  * tile. Cells store a rounded height clamped to a plane, so corners use saved instance heights where they exist.
  * Underlays blend over the neighbouring recorded underlays (the client's 11 by 11 window); hidden overlays and tiles

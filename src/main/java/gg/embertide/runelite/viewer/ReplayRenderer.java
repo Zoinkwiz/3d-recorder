@@ -18,8 +18,8 @@ final class ReplayRenderer
 {
 	static final int DEFAULT_OBJECT_LIMIT = 4096;
 	static final int MAX_OBJECT_LIMIT = 8192;
-	static final String NO_GROUND = "No ground in this recording, so only figures and objects are shown. Recordings made with an older recorder do not save the ground.";
-	static final String PARTIAL_GROUND = "This recording saved the floor only near where you walked. Recordings made with a newer recorder save all of it.";
+	static final String NO_GROUND = "No ground in this recording, so only figures and objects are shown.";
+	static final String PARTIAL_GROUND = "This recording saved the floor only near where you walked.";
 	private final Client client;
 	private final CacheModels models;
 	private final Map<String, ReplayObject> rendered = new LinkedHashMap<>();
