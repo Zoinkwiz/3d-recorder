@@ -6,6 +6,7 @@ import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -891,15 +892,33 @@ public class EmbertidePlugin extends Plugin
 		return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
 	}
 
+	// The Embertide mark at 16 px: the flame and its play.
 	private static BufferedImage icon()
 	{
 		BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = image.createGraphics();
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g.setColor(new Color(0xE8, 0x86, 0x3A));
-		g.fillOval(2, 2, 12, 12);
-		g.setColor(new Color(0xFF, 0xE0, 0xAD));
-		g.fillOval(6, 5, 4, 4);
+		Path2D.Float flame = new Path2D.Float();
+		flame.moveTo(7f, 1f);
+		flame.curveTo(11f, 2.1f, 14.8f, 5.1f, 15f, 8.8f);
+		flame.curveTo(15.1f, 9.8f, 14.4f, 10.5f, 13.4f, 11.1f);
+		flame.lineTo(8.3f, 14.2f);
+		flame.curveTo(7.5f, 14.7f, 7.1f, 14.7f, 6.4f, 14.1f);
+		flame.curveTo(4.7f, 12.7f, 3.2f, 11.1f, 2f, 9.4f);
+		flame.lineTo(4.5f, 10f);
+		flame.curveTo(3.5f, 7.9f, 2.3f, 5.8f, 1f, 4.2f);
+		flame.curveTo(3.6f, 4.9f, 5.8f, 5.9f, 7.7f, 7.2f);
+		flame.curveTo(8.6f, 5.1f, 8.4f, 3.0f, 7f, 1f);
+		flame.closePath();
+		g.setColor(new Color(0xFF, 0x5A, 0x1F));
+		g.fill(flame);
+		Path2D.Float play = new Path2D.Float();
+		play.moveTo(7f, 7f);
+		play.lineTo(12f, 10f);
+		play.lineTo(7f, 13f);
+		play.closePath();
+		g.setColor(new Color(0xFA, 0xF7, 0xF1));
+		g.fill(play);
 		g.dispose();
 		return image;
 	}
