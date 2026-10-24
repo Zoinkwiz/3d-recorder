@@ -108,7 +108,10 @@ public class EmbertidePlugin extends Plugin
 		final List<SavedFile> saved;
 		final boolean recording;
 		final boolean canToggle;
-		PanelState(String headline, String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle)
+		/** Whether the panel still asks if recording starts at every login. */
+		final boolean askLoginChoice;
+		PanelState(String headline, String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle,
+			boolean askLoginChoice)
 		{
 			this.headline = headline;
 			this.text = text;
@@ -116,6 +119,7 @@ public class EmbertidePlugin extends Plugin
 			this.saved = saved;
 			this.recording = recording;
 			this.canToggle = canToggle;
+			this.askLoginChoice = askLoginChoice;
 		}
 	}
 
@@ -719,14 +723,14 @@ public class EmbertidePlugin extends Plugin
 			boolean in = loggedIn;
 			if (!in)
 			{
-				text.append("\n\nLog in to start recording.");
+				text.append(resume ? "\n\nLog in to start recording." : "\n\nAfter you log in, press Start recording.");
 			}
 			else if (stopped && pending == null)
 			{
-				text.append("\n\nWhat you played so far is kept. Press Start recording to begin a new one.");
+				text.append("\n\nWhat you played so far is kept. Press Start recording to carry on with the same recording; logging out ends it.");
 			}
 			return new PanelState(handingOff ? "Saving…" : "Not recording", text.toString(), "", files, handingOff && resume,
-				in && !recover && (pending == null || handingOff));
+				in && !recover && (pending == null || handingOff), !config.loginChoiceMade());
 		}
 		// The headline carries the time, so only the capture's other states are repeated here.
 		String line = current.status();
@@ -745,7 +749,14 @@ public class EmbertidePlugin extends Plugin
 		}
 		boolean recording = current.recording();
 		String headline = recording ? "Recording · " + clock(earlier + current.seconds()) : "Not recording";
-		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording);
+		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade());
+	}
+
+	/** The player's answer to the panel's question: record at every login, or only after Start. Asked once. */
+	void chooseRecordOnLogin(boolean onLogin)
+	{
+		configManager.setConfiguration(EmbertideConfig.GROUP, "recordOnLogin", onLogin);
+		configManager.setConfiguration(EmbertideConfig.GROUP, "loginChoiceMade", true);
 	}
 
 	static String clock(double seconds)

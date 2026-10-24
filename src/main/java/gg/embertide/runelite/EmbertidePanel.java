@@ -30,6 +30,7 @@ public final class EmbertidePanel extends PluginPanel
 	private final JLabel headline = new JLabel("Not recording");
 	private final JTextArea status = text("");
 	private final JPanel files = new JPanel();
+	private final JPanel choice = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
 	private final JButton folder = new JButton("Show my recordings");
 	private final JButton retry = new JButton("Retry saving");
@@ -67,6 +68,29 @@ public final class EmbertidePanel extends PluginPanel
 		JPanel middle = new JPanel();
 		middle.setLayout(new BoxLayout(middle, BoxLayout.Y_AXIS));
 		middle.setOpaque(false);
+		choice.setLayout(new BoxLayout(choice, BoxLayout.Y_AXIS));
+		choice.setOpaque(false);
+		choice.setAlignmentX(LEFT_ALIGNMENT);
+		choice.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
+		JLabel ask = new JLabel("Record every time you log in?");
+		ask.setFont(ask.getFont().deriveFont(Font.BOLD));
+		ask.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		ask.setAlignmentX(LEFT_ALIGNMENT);
+		choice.add(ask);
+		JPanel answers = new JPanel(new GridLayout(0, 1, 0, 4));
+		answers.setOpaque(false);
+		answers.setAlignmentX(LEFT_ALIGNMENT);
+		answers.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+		JButton always = new JButton("Every time I log in");
+		always.addActionListener(e -> plugin.chooseRecordOnLogin(true));
+		JButton byHand = new JButton("Only when I press Start");
+		byHand.addActionListener(e -> plugin.chooseRecordOnLogin(false));
+		answers.add(always);
+		answers.add(byHand);
+		choice.add(answers);
+		choice.add(text("You can change this later in the plugin's settings, under Record when you log in."));
+		choice.setVisible(false);
+		middle.add(choice);
 		status.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
 		middle.add(status);
 		files.setLayout(new BoxLayout(files, BoxLayout.Y_AXIS));
@@ -133,6 +157,10 @@ public final class EmbertidePanel extends PluginPanel
 		if (!state.text.equals(status.getText()))
 		{
 			status.setText(state.text);
+		}
+		if (choice.isVisible() != state.askLoginChoice)
+		{
+			choice.setVisible(state.askLoginChoice);
 		}
 		toggle.setText(state.recording ? "Stop recording" : "Start recording");
 		toggle.setEnabled(state.canToggle);

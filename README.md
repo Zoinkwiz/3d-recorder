@@ -26,9 +26,11 @@ Change your angle of the same scene:
 ## How to make a clip
 
 1. Install the plugin and log in. It starts recording on its own. The side
-   panel's **Record** tab shows whether it is recording and for how long,
-   and a Stop button. To start and stop without opening the panel, pick a
-   key for **Start or stop hotkey** in the plugin's settings.
+   panel's **Record** tab asks once whether to record every time you log in
+   or only when you press Start, and shows whether it is recording and for
+   how long, with a Stop button. Stop then Start while you stay logged in
+   carries on with the same recording. To start and stop without opening the
+   panel, pick a key for **Start or stop hotkey** in the plugin's settings.
 2. Play as normal.
 3. When you're done, log out or press Stop, then open
    [embertide.gg/studio](https://embertide.gg/studio/) and drag your

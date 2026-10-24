@@ -107,6 +107,13 @@ public interface EmbertideConfig extends Config
 		return true;
 	}
 
+	/** Set once the player has answered the side panel's question about recording on login. */
+	@ConfigItem(keyName = "loginChoiceMade", name = "Login choice made", description = "", hidden = true)
+	default boolean loginChoiceMade()
+	{
+		return false;
+	}
+
 	@ConfigItem(
 		keyName = "recordHotkey",
 		name = "Start or stop hotkey",
