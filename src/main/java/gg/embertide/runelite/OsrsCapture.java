@@ -501,6 +501,17 @@ public final class OsrsCapture
 		emit("advancement", t, payload, PLAYER);
 	}
 
+	/** The player's clip key: the last lookBack seconds are a clip, so Studio finds it first. True once written. */
+	public boolean clipMark(int lookBack)
+	{
+		if (!acceptingEvents()) { return false; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("look_back_s", lookBack);
+		payload.addProperty("tick", client.getTickCount());
+		payload.addProperty("dimension", session.dimension);
+		return emit("osrs.clip_mark", session.time(), payload, PLAYER);
+	}
+
 	/** A fight already under way when this part opens: its start is written with the part's first rows. */
 	private String fightAtStart;
 	private int fightAtStartNpc = -1;
@@ -1144,6 +1155,7 @@ public final class OsrsCapture
 				+ "the text of friends, ignore, chat channel, clan, trade, duel, group ironman and party screens; elsewhere the player's own name reads You "
 				+ "and other players' names their Adventurer stand-in or nothing. Never other players' chat, or private, clan or friends chat.");
 		}
+		osrs.addProperty("clip_marks", "osrs.clip_mark {look_back_s, tick} when the player presses the clip key: the look_back_s seconds before the row are a clip they asked for.");
 		if (!config.fightNames().trim().isEmpty())
 		{
 			osrs.addProperty("fights", "osrs.fight {name, npc_id, phase: start|end} when one of the NPCs the player listed comes near and 30 seconds after it is gone"

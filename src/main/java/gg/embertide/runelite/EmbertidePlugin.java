@@ -151,7 +151,10 @@ public class EmbertidePlugin extends Plugin
 	private KeyManager keyManager;
 	@Inject
 	private OverlayManager overlayManager;
-	private final RecordingLight light = new RecordingLight(this::lightShown);
+	private final RecordingLight light = new RecordingLight(this::lightShown, this::lightLabel);
+	/** When the clip key last marked a clip, for the light's CLIPPED; -1 for never. */
+	private volatile long clippedAt = -1;
+	static final long CLIPPED_SHOWN_NANOS = TimeUnit.SECONDS.toNanos(2);
 
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
@@ -205,6 +208,14 @@ public class EmbertidePlugin extends Plugin
 			toggleRecording();
 		}
 	};
+	private final HotkeyListener clipKey = new HotkeyListener(() -> config.clipHotkey())
+	{
+		@Override
+		public void hotkeyPressed()
+		{
+			clipThat();
+		}
+	};
 
 	@Provides
 	EmbertideConfig provideConfig(ConfigManager configManager)
@@ -220,6 +231,7 @@ public class EmbertidePlugin extends Plugin
 		viewer.startUp();
 		eventBus.register(viewer);
 		keyManager.registerKeyListener(hotkey);
+		keyManager.registerKeyListener(clipKey);
 		overlayManager.add(light);
 		prepareFolder();
 		int generation = ++uiGeneration;
@@ -247,6 +259,7 @@ public class EmbertidePlugin extends Plugin
 		enabled = false;
 		continuing = false;
 		keyManager.unregisterKeyListener(hotkey);
+		keyManager.unregisterKeyListener(clipKey);
 		overlayManager.remove(light);
 		++uiGeneration;
 		EmbertidePanel closingPanel = panel;
@@ -788,6 +801,22 @@ public class EmbertidePlugin extends Plugin
 		boolean recording = current.recording();
 		String headline = recording ? "Recording · " + clock(earlier + current.seconds()) : "Not recording";
 		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade());
+	}
+
+	/** The clip key: marks the last moments as a clip in the recording, on the client thread. */
+	void clipThat()
+	{
+		clientThread.invoke(() ->
+		{
+			OsrsCapture current = capture;
+			if (current != null && current.recording() && current.clipMark(config.clipSeconds())) { clippedAt = nanos.getAsLong(); }
+		});
+	}
+
+	private String lightLabel()
+	{
+		long at = clippedAt;
+		return at >= 0 && nanos.getAsLong() - at < CLIPPED_SHOWN_NANOS ? "CLIPPED" : "REC";
 	}
 
 	private boolean lightShown()

@@ -33,7 +33,10 @@ Change your angle of the same scene:
    hold Alt to drag it). Stop then Start while you stay logged in carries on
    with the same recording. To start and stop without opening the
    panel, pick a key for **Start or stop hotkey** in the plugin's settings.
-2. Play as normal.
+2. Play as normal. Did something worth keeping? Press your **Clip that
+   hotkey** (set it in the plugin's settings): the last 30 seconds, or as
+   many as **Clip reaches back** says, are marked as a clip, the light says
+   CLIPPED, and Studio puts that clip first.
 3. When you're done, log out or press Stop, then open
    [embertide.gg/studio](https://embertide.gg/studio/) and drag your
    recording in. **Show my recordings** in the side panel tells you where it

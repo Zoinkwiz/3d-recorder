@@ -141,6 +141,29 @@ public interface EmbertideConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "clipHotkey",
+		name = "Clip that hotkey",
+		description = "A key that marks the last moments as a clip while you record, so Studio finds it first. Not set unless you choose one.",
+		position = 8
+	)
+	default Keybind clipHotkey()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+		keyName = "clipSeconds",
+		name = "Clip reaches back",
+		description = "How many seconds before you press Clip that hotkey the clip starts.",
+		position = 8
+	)
+	@Range(min = 5, max = 300)
+	default int clipSeconds()
+	{
+		return 30;
+	}
+
+	@ConfigItem(
 		keyName = "chunkMinutes",
 		name = "Minutes per file",
 		description = "Long sessions are saved as one file per this many minutes. Studio shows them as one recording.",
