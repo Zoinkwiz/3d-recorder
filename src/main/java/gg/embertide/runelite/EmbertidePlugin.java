@@ -14,9 +14,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -184,6 +186,16 @@ public class EmbertidePlugin extends Plugin
 	/** Seconds in this series' finished parts. */
 	private volatile double earlier;
 	private final Map<String, String> pseudonyms = new HashMap<>();
+	/** How long a fight lasts after its boss is gone, and the longest one fight is recorded alone. */
+	static final long FIGHT_LINGER_NANOS = TimeUnit.SECONDS.toNanos(30), FIGHT_LIMIT_NANOS = TimeUnit.MINUTES.toNanos(30);
+	/** The listed boss near now, or within FIGHT_LINGER_NANOS of leaving; null otherwise. */
+	private volatile String fight;
+	private int fightNpc = -1;
+	private long fightSeen, fightStarted;
+	/** A fight recorded alone ran past FIGHT_LIMIT_NANOS; it records again once that boss is gone. */
+	private boolean fightOverLimit;
+	private String fightList;
+	private Set<String> fightNames = Set.of();
 	private final List<SavedFile> saved = new CopyOnWriteArrayList<>();
 	private final HotkeyListener hotkey = new HotkeyListener(() -> config.recordHotkey())
 	{
@@ -314,7 +326,14 @@ public class EmbertidePlugin extends Plugin
 	public void onGameTick(GameTick event)
 	{
 		loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		watchFights();
 		OsrsCapture current = capture;
+		if (current != null && config.fightsOnly() && (fight == null || fightOverLimit))
+		{
+			endCapture(fight == null ? "fight over" : "fight limit", false);
+			series = null;
+			return;
+		}
 		if (current == null)
 		{
 			if (wantsRecording())
@@ -736,6 +755,10 @@ public class EmbertidePlugin extends Plugin
 					+ pending.recorder().error() + "\n\nRetry saving, or discard it."
 				: stopped ? "Not recording." : notice);
 			boolean in = loggedIn;
+			if (in && !stopped && !recover && !handingOff && config.fightsOnly() && fight == null)
+			{
+				text.append("\n\nRecording starts when one of your bosses is near.");
+			}
 			if (!in)
 			{
 				text.append(resume ? "\n\nLog in to start recording." : "\n\nAfter you log in, press Start recording.");
@@ -795,14 +818,86 @@ public class EmbertidePlugin extends Plugin
 
 	private boolean wantsRecording()
 	{
-		return resumes() && client.getGameState() == GameState.LOGGED_IN;
+		return resumes() && client.getGameState() == GameState.LOGGED_IN && (!config.fightsOnly() || (fight != null && !fightOverLimit));
+	}
+
+	/** Each game tick: whether one of the player's listed bosses is near, marking each fight's start and end. */
+	private void watchFights()
+	{
+		String list = config.fightNames();
+		if (!list.equals(fightList))
+		{
+			fightList = list;
+			fightNames = fightNames(list);
+		}
+		long now = nanos.getAsLong();
+		String near = null;
+		int id = -1;
+		WorldView view = client.getTopLevelWorldView();
+		if (!fightNames.isEmpty() && view != null && client.getGameState() == GameState.LOGGED_IN)
+		{
+			for (NPC npc : view.npcs())
+			{
+				String name = npc == null || npc.getName() == null ? null : Text.removeTags(npc.getName());
+				if (name != null && fightNames.contains(name.toLowerCase(Locale.ROOT)))
+				{
+					near = name;
+					id = npc.getId();
+					break;
+				}
+			}
+		}
+		OsrsCapture current = capture;
+		if (near != null)
+		{
+			if (fight == null)
+			{
+				fight = near;
+				fightNpc = id;
+				fightStarted = now;
+				if (current != null) { current.fight(near, id, true); }
+			}
+			fightSeen = now;
+			if (now - fightStarted > FIGHT_LIMIT_NANOS) { fightOverLimit = true; }
+		}
+		else if (fight != null && now - fightSeen > FIGHT_LINGER_NANOS)
+		{
+			if (current != null) { current.fight(fight, fightNpc, false); }
+			fight = null;
+			fightNpc = -1;
+			fightOverLimit = false;
+		}
+	}
+
+	/** The boss names a player listed, lower case, separated by commas. */
+	static Set<String> fightNames(String list)
+	{
+		Set<String> names = new HashSet<>();
+		for (String name : list.split(","))
+		{
+			String trimmed = name.trim().toLowerCase(Locale.ROOT);
+			if (!trimmed.isEmpty()) { names.add(trimmed); }
+		}
+		return names;
 	}
 
 	static String fileStem(String playerName)
 	{
-		String who = playerName == null ? "" : playerName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+		return fileStem(playerName, null);
+	}
+
+	/** osrs-date-time-character, and the boss's name for a fight recorded alone. */
+	static String fileStem(String playerName, String boss)
+	{
+		String who = slug(playerName);
+		String what = slug(boss);
 		String when = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
-		return "osrs-" + when + (who.isEmpty() ? "" : "-" + who);
+		return "osrs-" + when + (who.isEmpty() ? "" : "-" + who) + (what.isEmpty() ? "" : "-" + what);
+	}
+
+	private static String slug(String text)
+	{
+		return text == null ? "" : text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
 	}
 
 	private void changeScene()
@@ -836,11 +931,12 @@ public class EmbertidePlugin extends Plugin
 		Recorder recorder = new MccrFileRecorder(gson, folder, () ->
 		{
 			Player who = client.getLocalPlayer();
-			return fileStem(who == null ? null : who.getName());
+			return fileStem(who == null ? null : who.getName(), config.fightsOnly() ? fight : null);
 		}, executor);
 		OsrsCapture next = new OsrsCapture(client, recorder, config, dimension, me.getName(), client.getWorld(),
 			series, nextPart++, pseudonyms, config.chunkMinutes() * 60.0);
 		next.account(accountKey());
+		next.fightOnStart(fight, fightNpc);
 		capture = next;
 		continuing = true;
 		rediscover = true;

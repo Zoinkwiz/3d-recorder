@@ -501,6 +501,28 @@ public final class OsrsCapture
 		emit("advancement", t, payload, PLAYER);
 	}
 
+	/** A fight already under way when this part opens: its start is written with the part's first rows. */
+	private String fightAtStart;
+	private int fightAtStartNpc = -1;
+
+	public void fightOnStart(String name, int npcId)
+	{
+		fightAtStart = name;
+		fightAtStartNpc = npcId;
+	}
+
+	/** The start or end of a fight with one of the player's listed bosses, so Studio can jump to it. */
+	public void fight(String name, int npcId, boolean start)
+	{
+		if (!acceptingEvents() || name == null) { return; }
+		JsonObject payload = new JsonObject();
+		payload.addProperty("name", name);
+		if (npcId >= 0) { payload.addProperty("npc_id", npcId); }
+		payload.addProperty("phase", start ? "start" : "end");
+		payload.addProperty("dimension", session.dimension);
+		emit("osrs.fight", session.time(), payload, PLAYER);
+	}
+
 	public void gameMessage(GameMessages.Match match)
 	{
 		if (!acceptingEvents() || !config.recordMoments() || match == null)
@@ -1122,6 +1144,11 @@ public final class OsrsCapture
 				+ "the text of friends, ignore, chat channel, clan, trade, duel, group ironman and party screens; elsewhere the player's own name reads You "
 				+ "and other players' names their Adventurer stand-in or nothing. Never other players' chat, or private, clan or friends chat.");
 		}
+		if (!config.fightNames().trim().isEmpty())
+		{
+			osrs.addProperty("fights", "osrs.fight {name, npc_id, phase: start|end} when one of the NPCs the player listed comes near and 30 seconds after it is gone"
+				+ (config.fightsOnly() ? "; this recording holds only such a fight." : "."));
+		}
 		if (config.recordClicks())
 		{
 			osrs.addProperty("clicks", "Recorded because Record your clicks is on: osrs.click for each menu option the player chose, {option, action: the menu action type, "
@@ -1282,6 +1309,11 @@ public final class OsrsCapture
 		if (rediscover) { seedActors(view); }
 		vitals(t);
 		audio(t);
+		if (fightAtStart != null && acceptingEvents())
+		{
+			fight(fightAtStart, fightAtStartNpc, true);
+			fightAtStart = null;
+		}
 		if (config.recordInterface()) { playerInterface(t); }
 		if (rediscover || !Arrays.equals(lastRegions, regions(view)))
 		{

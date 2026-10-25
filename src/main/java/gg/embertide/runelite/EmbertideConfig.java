@@ -12,6 +12,9 @@ public interface EmbertideConfig extends Config
 {
 	String GROUP = "embertide";
 
+	@ConfigSection(name = "Boss fights", description = "Mark your boss fights in the recording, or record only them.", position = 9)
+	String FIGHTS = "fights";
+
 	@ConfigSection(name = "Watching in your house", description = "How a recording looks when you watch it in your house.", position = 10)
 	String WATCH = "watch";
 
@@ -169,6 +172,21 @@ public interface EmbertideConfig extends Config
 	default boolean recordingLight()
 	{
 		return true;
+	}
+
+	@ConfigItem(keyName = "fightNames", name = "Boss names", description = "NPC names, separated by commas, for example Zulrah, Vorkath. "
+		+ "Each fight with one of them is marked in the recording, so Studio can jump to it.", position = 1, section = FIGHTS)
+	default String fightNames()
+	{
+		return "";
+	}
+
+	@ConfigItem(keyName = "fightsOnly", name = "Record only these fights", description = "Record only while one of the bosses above is near, "
+		+ "and for 30 seconds after it is gone. Each attempt is its own recording, named after the boss, and stops after 30 minutes at most.",
+		position = 2, section = FIGHTS)
+	default boolean fightsOnly()
+	{
+		return false;
 	}
 
 	@ConfigItem(keyName = "viewerWidth", name = "Miniature width", description = "How many tiles wide a miniature is.", position = 11, section = WATCH)

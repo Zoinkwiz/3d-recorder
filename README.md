@@ -45,6 +45,17 @@ Long sessions are saved as a few files. Studio and the app show them as one
 recording. A world hop, or a lost connection you're back from within five
 minutes, saves a new file in the same recording. Logging out ends it.
 
+## Boss fights
+
+List your bosses under **Boss fights** in the plugin's settings, by name and
+separated by commas (for example Zulrah, Vorkath). Each fight with one of them
+is marked in the recording, from when it comes near until 30 seconds after it
+is gone, so Studio can jump straight to it.
+
+Tick **Record only these fights** to record nothing else: each attempt is its
+own recording, named after the boss, and stops after 30 minutes at most. The
+side panel says when it is waiting for one of your bosses.
+
 ## Watch it in your house
 
 The side panel's **Watch** tab plays a saved recording back in your
