@@ -175,11 +175,14 @@ while I play**.
 ## Where the recordings are
 
 `.runelite/plugin-data/3d-recorder/`, one `.embertide` file per part of a
-session, named with the date, time and your character's name. **Show my
-recordings** in the side panel shows the full path.
+session, named with the date, time and your character's name, and the boss's
+name for a fight recorded on its own. **Show my recordings** in the side panel
+shows the full path.
 
-Each file is gzipped JSON Lines. If saving a part fails, the side panel
-offers to retry.
+A `.embertide` file is an Embertide recording: drag it into
+[embertide.gg/studio](https://embertide.gg/studio/), or the Embertide app finds
+it by itself. While a part is still recording it ends in `.embertide.partial`.
+If saving a part fails, the side panel offers to retry.
 
 ## Questions and help
 
@@ -187,8 +190,3 @@ Ask questions, report bugs or show what you made in the
 [Embertide Discord](https://discord.gg/XbGqAEubSR). **Join the Embertide
 Discord** at the bottom of the side panel opens the same invite. It only opens
 your browser when you click it.
-
-## Development
-
-With JDK 11, `./gradlew run` (or double-click `run-dev.command` on a Mac)
-starts a RuneLite development client with the plugin.
