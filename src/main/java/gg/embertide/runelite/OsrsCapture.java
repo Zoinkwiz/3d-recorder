@@ -713,7 +713,8 @@ public final class OsrsCapture
 		if (entry.getItemId() > 0) { payload.addProperty("item", entry.getItemId()); }
 		if (type != null && type.name().startsWith("GAME_OBJECT")) { payload.addProperty("object", entry.getIdentifier()); }
 		Point mouse = client.getMouseCanvasPosition();
-		if (mouse != null) { payload.add("at", ints(new int[]{mouse.getX(), mouse.getY()})); }
+		// Off the canvas (a scene reload, the pointer elsewhere) the client says -1, -1: no position then.
+		if (mouse != null && mouse.getX() >= 0 && mouse.getY() >= 0) { payload.add("at", ints(new int[]{mouse.getX(), mouse.getY()})); }
 		payload.addProperty("panel", client.getVarcIntValue(VarClientID.TOPLEVEL_PANEL));
 		payload.addProperty("tick", client.getTickCount());
 		payload.addProperty("cycle", client.getGameCycle());
