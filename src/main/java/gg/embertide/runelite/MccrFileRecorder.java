@@ -32,6 +32,8 @@ public final class MccrFileRecorder implements Recorder
 	public static final String STUDIO_URL = "https://embertide.gg/studio/?source=runelite";
 	/** osrs.motion x and y as thousandths of a tile, each actor's first absolute and then its change. */
 	public static final String MOTION_XY = "delta-milli";
+	/** Embertide's recording file type; older parts in the folder end in .embertide or .mccr. */
+	public static final String EXTENSION = ".e4d";
 	// The desktop's 128 MiB archive also includes ingest checkpoints and links.
 	static final int MAX_BYTES = 120 * 1024 * 1024;
 	static final int END_RESERVE = 16 * 1024;
@@ -111,7 +113,7 @@ public final class MccrFileRecorder implements Recorder
 		}
 		// The supplier may read the local player's name: this stays on the client thread.
 		name = stem.get() + "-" + unique;
-		sealed = directory.joinSegment(name + ".embertide");
+		sealed = directory.joinSegment(name + EXTENSION);
 		state = State.READY;
 		if (header.has("osrs") && header.get("osrs").isJsonObject())
 		{
@@ -293,7 +295,7 @@ public final class MccrFileRecorder implements Recorder
 	private void openPartial() throws IOException
 	{
 		directory.createDirectories();
-		Filepath fresh = directory.joinSegment(name + "-" + UUID.randomUUID() + ".embertide.partial");
+		Filepath fresh = directory.joinSegment(name + "-" + UUID.randomUUID() + EXTENSION + ".partial");
 		out = new GZIPOutputStream(new BufferedOutputStream(
 			fresh.openOutputStream(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), 64 * 1024), 64 * 1024, true);
 		partial = fresh;
