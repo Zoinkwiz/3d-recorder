@@ -25,10 +25,11 @@ Change your angle of the same scene:
 
 ## How to make a clip
 
-1. Install the plugin and log in. It starts recording on its own. The side
-   panel's **Record** tab asks once whether to record every time you log in
-   or only when you press Start, and shows whether it is recording and for
-   how long, with a Stop button. While it records, a small red light and
+1. Install the plugin and log in. Your deaths are clipped from the start
+   ([Always clip](#always-clip)). To record whole sessions, press **Start
+   recording** in the side panel's **Record** tab; it asks once whether to
+   record every time you log in instead, which is off until you choose it. The
+   tab shows whether it is recording and for how long, with a Stop button. While it records, a small red light and
    REC show on the game screen (**Show a recording light** in the settings;
    hold Alt to drag it). Stop then Start while you stay logged in carries on
    with the same recording. To start and stop without opening the
@@ -36,13 +37,16 @@ Change your angle of the same scene:
 2. Play as normal. Did something worth keeping? Press your **Clip that
    hotkey** (set it in the plugin's settings): the last 30 seconds, or as
    many as **Clip reaches back** says, are marked as a clip, the light says
-   CLIPPED, and Studio puts that clip first.
+   CLIPPED, and Studio puts that clip first. With Always clip on, the key and
+   the side panel's **Save a clip** also save a clip of their own, recording
+   or not.
 3. When you're done, log out or press Stop, then open
    [embertide.gg/studio](https://embertide.gg/studio/) and drag your
    recording in. **Show my recordings** in the side panel tells you where it
-   is. After a stop, the **Record** tab shows these next steps: **Open in
-   Studio**, and **Watch in your house** under each saved part. Tick **Open
-   Studio when you log out** and the site opens by itself.
+   is. The **Record** tab lists your clips by name and this session's last
+   few parts by the time they began, each with **Watch** to play it in your
+   house, and **Open Studio** at the bottom. Tick **Open Studio when you log
+   out** and the site opens by itself.
 
 Long sessions are saved as a few files. Studio and the app show them as one
 recording. A world hop, or a lost connection you're back from within five
@@ -159,6 +163,24 @@ It never records what you type, never names another player (a click on one
 points at their unnamed figure), leaves out what you click in the chatbox,
 private chat and social screens, and records nothing while the bank PIN is
 open.
+
+## Always clip
+
+**Always clip** saves a short clip each time something you ticked happens,
+whether or not you are recording: your deaths, drops worth at least an amount
+you choose, level-ups, pets and collection log slots, and boss kills. Deaths are on
+unless you turn them off; the others are off until you turn them on.
+
+With any of them on, the plugin keeps the last few seconds of play in memory,
+recorded the same way as a recording with your settings. When one of them
+happens, it saves a clip of the seconds before and after (20 and 5 unless you
+change them) to its folder, named after what happened. Studio opens it like any
+recording. Nothing is written while nothing happens, and what is kept in memory
+is let go every minute or so. With Always clip on, the Clip that hotkey saves a
+clip too.
+
+Drops, pets, collection log slots and boss kills come from the drops and
+milestones the plugin records, so they need **Record drops and milestones** on.
 
 ## Privacy
 

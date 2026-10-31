@@ -97,10 +97,18 @@ public class EmbertidePlugin extends Plugin
 	{
 		final String name;
 		final double seconds;
+		/** A clip's title ("Died to Vorkath"); null for a part of a recording. */
+		final String title;
 		SavedFile(String name, double seconds)
+		{
+			this(name, seconds, null);
+		}
+
+		SavedFile(String name, double seconds, String title)
 		{
 			this.name = name;
 			this.seconds = seconds;
+			this.title = title;
 		}
 	}
 
@@ -114,6 +122,10 @@ public class EmbertidePlugin extends Plugin
 		final boolean canToggle;
 		/** Whether the panel still asks if recording starts at every login. */
 		final boolean askLoginChoice;
+		/** Always clip: the clips saved since the plugin started, what it saves, and whether Save a clip can save one now. */
+		List<SavedFile> clips = List.of();
+		String clipsLine = "";
+		boolean canClip;
 		PanelState(String headline, String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle,
 			boolean askLoginChoice)
 		{
@@ -159,6 +171,10 @@ public class EmbertidePlugin extends Plugin
 	private EmbertidePanel panel;
 	private NavigationButton navigationButton;
 	private volatile OsrsCapture capture;
+	/** Always clip: recent play in memory, saved as a clip when something the player ticked happens. Client thread. */
+	private final ClipBuffers clips = new ClipBuffers(() -> this.nanos.getAsLong(), this::clipCapture, this::clipFile,
+		title -> notice = "Saving a clip: " + title + ".",
+		(title, file, seconds) -> this.savedClips.add(new SavedFile(fileName(file, title), seconds, title)));
 	private volatile String notice = "Ready to record.";
 	private boolean rediscover = true;
 	private SceneIdentity sceneIdentity;
@@ -200,6 +216,7 @@ public class EmbertidePlugin extends Plugin
 	private String fightList;
 	private Set<String> fightNames = Set.of();
 	private final List<SavedFile> saved = new CopyOnWriteArrayList<>();
+	private final List<SavedFile> savedClips = new CopyOnWriteArrayList<>();
 	private final HotkeyListener hotkey = new HotkeyListener(() -> config.recordHotkey())
 	{
 		@Override
@@ -269,7 +286,11 @@ public class EmbertidePlugin extends Plugin
 			if (closingButton != null) { clientToolbar.removeNavigation(closingButton); }
 			if (closingPanel != null) { closingPanel.dispose(); }
 		});
-		clientThread.invoke(() -> endCapture("plugin stopped", false));
+		clientThread.invoke(() ->
+		{
+			clips.stop("plugin stopped");
+			endCapture("plugin stopped", false);
+		});
 		eventBus.unregister(viewer);
 		viewer.shutDown();
 	}
@@ -284,14 +305,19 @@ public class EmbertidePlugin extends Plugin
 	{
 		loggedIn = event.getGameState() == GameState.LOGGED_IN;
 		if (capture != null) { capture.gameState(event.getGameState().name()); }
+		clips.all(c -> c.gameState(event.getGameState().name()));
 		switch (event.getGameState())
 		{
 			case LOADING:
 				if (capture != null) { capture.loading(true); }
+				clips.all(c -> c.loading(true));
+				clips.rediscover();
 				rediscover = true;
 				break;
 			case LOGGED_IN:
 				if (capture != null) { capture.loading(false); }
+				clips.all(c -> c.loading(false));
+				clips.rediscover();
 				rediscover = true;
 				if (heldSince >= 0)
 				{
@@ -312,6 +338,7 @@ public class EmbertidePlugin extends Plugin
 				}
 				break;
 			case LOGIN_SCREEN:
+				clips.stop("logged out");
 				continuing = false;
 				endCapture("logged out", config.openStudioOnLogout());
 				// A logout ends the sitting; a drop that fell back to this screen waits for the next login.
@@ -323,6 +350,7 @@ public class EmbertidePlugin extends Plugin
 			case HOPPING:
 			case CONNECTION_LOST:
 				// The next part starts on arrival; LOGGED_IN decides whether it continues this series.
+				clips.stop("logged out");
 				endCapture("logged out", false);
 				if (series != null && heldSince < 0)
 				{
@@ -340,6 +368,7 @@ public class EmbertidePlugin extends Plugin
 	{
 		loggedIn = client.getGameState() == GameState.LOGGED_IN;
 		watchFights();
+		tickClips();
 		OsrsCapture current = capture;
 		if (current != null && config.fightsOnly() && (fight == null || fightOverLimit))
 		{
@@ -389,30 +418,76 @@ public class EmbertidePlugin extends Plugin
 		{
 			current.clientTick();
 		}
+		if (client.getGameState() == GameState.LOGGED_IN) { clips.clientTick(); }
+	}
+
+	/** Always clip, once a game tick: which kinds the player ticked, and whether there is anywhere to save a clip. */
+	private void tickClips()
+	{
+		ClipTriggers.Wanted wanted = new ClipTriggers.Wanted(config.clipDeaths(), config.clipDrops() && config.recordMoments(),
+			config.clipDropValue(), config.clipLevels(), config.clipPets() && config.recordMoments(),
+			config.clipKills() && config.recordMoments(), true);
+		boolean can = enabled && loggedIn && folder != null && wanted.any();
+		if (can && clips.running() && !SceneIdentity.of(client.getTopLevelWorldView()).equals(sceneIdentity))
+		{
+			// Before the captures in memory tick: with no recording running, nothing else would tell them.
+			changeScene();
+		}
+		clips.tick(can, wanted, config.clipBefore(), config.clipAfter());
+	}
+
+	/** A capture into memory for Always clip, started; null before there is a player and a scene. */
+	private OsrsCapture clipCapture(ClipBuffer buffer)
+	{
+		Player me = client.getLocalPlayer();
+		WorldView view = client.getTopLevelWorldView();
+		if (me == null || view == null) { return null; }
+		if (sceneIdentity == null) { sceneIdentity = SceneIdentity.of(view); }
+		OsrsCapture next = new OsrsCapture(client, buffer, config, SceneIdentity.of(view).dimension(), me.getName(), client.getWorld(),
+			UUID.randomUUID().toString(), 1, new HashMap<>(), ClipBuffers.CAPTURE_MAX_S);
+		next.account(accountKey());
+		next.start();
+		return next;
+	}
+
+	/** The file a kept clip is saved to, named after what set it off. */
+	private Recorder clipFile(String reason)
+	{
+		Filepath into = folder;
+		if (into == null) { return null; }
+		return new MccrFileRecorder(gson, into, () ->
+		{
+			Player who = client.getLocalPlayer();
+			return fileStem(who == null ? null : who.getName(), "clip-" + reason);
+		}, executor);
 	}
 
 	@Subscribe
 	public void onNpcSpawned(NpcSpawned event)
 	{
 		if (capture != null) { capture.actorSpawned(event.getNpc()); }
+		clips.all(c -> c.actorSpawned(event.getNpc()));
 	}
 
 	@Subscribe
 	public void onNpcDespawned(NpcDespawned event)
 	{
 		if (capture != null) { capture.actorDespawned(event.getNpc()); }
+		clips.all(c -> c.actorDespawned(event.getNpc()));
 	}
 
 	@Subscribe
 	public void onPlayerSpawned(PlayerSpawned event)
 	{
 		if (capture != null) { capture.actorSpawned(event.getPlayer()); }
+		clips.all(c -> c.actorSpawned(event.getPlayer()));
 	}
 
 	@Subscribe
 	public void onPlayerDespawned(PlayerDespawned event)
 	{
 		if (capture != null) { capture.actorDespawned(event.getPlayer()); }
+		clips.all(c -> c.actorDespawned(event.getPlayer()));
 	}
 
 	@Subscribe
@@ -420,87 +495,85 @@ public class EmbertidePlugin extends Plugin
 	{
 		OsrsCapture current = capture;
 		Actor actor = event.getActor();
-		if (current == null || rediscover || !config.recordOverheadText() || !(actor instanceof NPC) || !config.trackNpcs())
+		if (!config.recordOverheadText() || !(actor instanceof NPC) || !config.trackNpcs())
 		{
 			return;
 		}
-		current.overhead(actor, event.getOverheadText(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.overhead(actor, event.getOverheadText(), client.getLocalPlayer()); }
+		clips.each(c -> c.overhead(actor, event.getOverheadText(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover)
-		{
-			return;
-		}
-		current.hitsplat(event.getActor(), event.getHitsplat(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.hitsplat(event.getActor(), event.getHitsplat(), client.getLocalPlayer()); }
+		clips.each(c -> c.hitsplat(event.getActor(), event.getHitsplat(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onProjectileMoved(ProjectileMoved event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover) { return; }
-		current.projectile(event.getProjectile(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.projectile(event.getProjectile(), client.getLocalPlayer()); }
+		clips.each(c -> c.projectile(event.getProjectile(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onSoundEffectPlayed(SoundEffectPlayed event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover) { return; }
-		current.sound(event.getSoundId(), event.getDelay(), event.getSource(), null, null, null, client.getLocalPlayer());
+		if (current != null && !rediscover) { current.sound(event.getSoundId(), event.getDelay(), event.getSource(), null, null, null, client.getLocalPlayer()); }
+		clips.each(c -> c.sound(event.getSoundId(), event.getDelay(), event.getSource(), null, null, null, client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover) { return; }
-		current.sound(event.getSoundId(), event.getDelay(), event.getSource(), event.getSceneX(), event.getSceneY(), event.getRange(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.sound(event.getSoundId(), event.getDelay(), event.getSource(), event.getSceneX(), event.getSceneY(), event.getRange(), client.getLocalPlayer()); }
+		clips.each(c -> c.sound(event.getSoundId(), event.getDelay(), event.getSource(), event.getSceneX(), event.getSceneY(), event.getRange(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onActorDeath(ActorDeath event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover)
-		{
-			return;
-		}
-		current.actorDied(event.getActor(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.actorDied(event.getActor(), client.getLocalPlayer()); }
+		clips.each(c -> c.actorDied(event.getActor(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover) { return; }
-		current.click(event.getMenuEntry(), client.getLocalPlayer());
+		if (current != null && !rediscover) { current.click(event.getMenuEntry(), client.getLocalPlayer()); }
+		clips.each(c -> c.click(event.getMenuEntry(), client.getLocalPlayer()));
 	}
 
 	@Subscribe
 	public void onStatChanged(StatChanged event)
 	{
 		OsrsCapture current = capture;
-		if (current == null)
-		{
-			return;
-		}
-		current.statChanged(event.getSkill(), event.getLevel(), event.getXp(), event.getBoostedLevel());
+		if (current != null) { current.statChanged(event.getSkill(), event.getLevel(), event.getXp(), event.getBoostedLevel()); }
+		clips.all(c -> c.statChanged(event.getSkill(), event.getLevel(), event.getXp(), event.getBoostedLevel()));
 	}
 
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		OsrsCapture current = capture;
 		Player me = client.getLocalPlayer();
-		if (current == null || me == null)
+		if (me == null)
 		{
 			return;
 		}
+		OsrsCapture current = capture;
+		if (current != null) { chatMessage(current, event, me); }
+		clips.all(c -> chatMessage(c, event, me));
+	}
+
+	private void chatMessage(OsrsCapture current, ChatMessage event, Player me)
+	{
 		// The chatbox as the game showed it, with Record the game interface on; kinds are filtered there.
 		String sender = event.getName() == null ? "" : Text.removeTags(event.getName());
 		current.chatbox(event.getType(), sender, event.getMessage(), me.getName() != null && sender.equalsIgnoreCase(Text.removeTags(me.getName())));
@@ -528,12 +601,14 @@ public class EmbertidePlugin extends Plugin
 	public void onNpcLootReceived(NpcLootReceived event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || !config.recordMoments())
+		if ((current == null && !clips.running()) || !config.recordMoments())
 		{
 			return;
 		}
 		NPC npc = event.getNpc();
-		current.loot("npc", npc == null ? null : npc.getName(), npc, priced(event.getItems()));
+		List<int[]> items = priced(event.getItems());
+		if (current != null) { current.loot("npc", npc == null ? null : npc.getName(), npc, items); }
+		clips.all(c -> c.loot("npc", npc == null ? null : npc.getName(), npc, items));
 	}
 
 	@Subscribe
@@ -541,14 +616,17 @@ public class EmbertidePlugin extends Plugin
 	{
 		OsrsCapture current = capture;
 		// NPC kills arrive via NpcLootReceived.
-		if (current == null || !config.recordMoments() || event.getType() == null
+		if ((current == null && !clips.running()) || !config.recordMoments() || event.getType() == null
 			|| event.getType() == LootRecordType.NPC)
 		{
 			return;
 		}
 		String kind = event.getType().name().toLowerCase(Locale.ROOT);
 		// Never record another player's name.
-		current.loot(kind, "player".equals(kind) ? null : event.getName(), null, priced(event.getItems()));
+		String name = "player".equals(kind) ? null : event.getName();
+		List<int[]> items = priced(event.getItems());
+		if (current != null) { current.loot(kind, name, null, items); }
+		clips.all(c -> c.loot(kind, name, null, items));
 	}
 
 	/** [item id, quantity, GE price each]; client thread. */
@@ -619,33 +697,37 @@ public class EmbertidePlugin extends Plugin
 	public void onItemSpawned(ItemSpawned event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
-		current.itemChanged(event.getTile(), event.getItem(), true);
+		if (client.getGameState() != GameState.LOGGED_IN) { return; }
+		if (current != null && !rediscover) { current.itemChanged(event.getTile(), event.getItem(), true); }
+		clips.each(c -> c.itemChanged(event.getTile(), event.getItem(), true));
 	}
 
 	@Subscribe
 	public void onItemDespawned(ItemDespawned event)
 	{
 		OsrsCapture current = capture;
-		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN) { return; }
-		current.itemChanged(event.getTile(), event.getItem(), false);
+		if (client.getGameState() != GameState.LOGGED_IN) { return; }
+		if (current != null && !rediscover) { current.itemChanged(event.getTile(), event.getItem(), false); }
+		clips.each(c -> c.itemChanged(event.getTile(), event.getItem(), false));
 	}
 
 	private void objectChanged(Tile tile, TileObject object, boolean spawned)
 	{
 		OsrsCapture current = capture;
 		// Scene-load spawns are included in the next baseline rather than emitted as transitions.
-		if (current == null || rediscover || client.getGameState() != GameState.LOGGED_IN)
+		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
 		}
-		current.objectChanged(tile, object, spawned);
+		if (current != null && !rediscover) { current.objectChanged(tile, object, spawned); }
+		clips.each(c -> c.objectChanged(tile, object, spawned));
 	}
 
 	@Subscribe
 	public void onClientShutdown(ClientShutdown event)
 	{
 		enabled = false;
+		clips.stop("client closed");
 		event.waitFor(endCapture("client closed", false));
 	}
 
@@ -780,8 +862,8 @@ public class EmbertidePlugin extends Plugin
 			{
 				text.append("\n\nWhat you played so far is kept. Press Start recording to carry on with the same recording; logging out ends it.");
 			}
-			return new PanelState(handingOff ? "Saving…" : "Not recording", text.toString(), "", files, handingOff && resume,
-				in && !recover && (pending == null || handingOff), !config.loginChoiceMade());
+			return withClips(new PanelState(handingOff ? "Saving…" : "Not recording", text.toString().trim(), "", files, handingOff && resume,
+				in && !recover && (pending == null || handingOff), !config.loginChoiceMade()));
 		}
 		// The headline carries the time, so only the capture's other states are repeated here.
 		String line = current.status();
@@ -794,13 +876,32 @@ public class EmbertidePlugin extends Plugin
 		{
 			text.append("Cannot save: ").append(recorder.error());
 		}
-		else
-		{
-			text.append("Other players are recorded as unnamed figures.");
-		}
 		boolean recording = current.recording();
 		String headline = recording ? "Recording · " + clock(earlier + current.seconds()) : "Not recording";
-		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade());
+		return withClips(new PanelState(headline, text.toString().trim(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade()));
+	}
+
+	private PanelState withClips(PanelState state)
+	{
+		state.clips = new ArrayList<>(savedClips);
+		state.canClip = clips.running();
+		state.clipsLine = clipsLine();
+		return state;
+	}
+
+	/** "Saving clips of your deaths and level-ups.", or how to turn them on. */
+	private String clipsLine()
+	{
+		List<String> kinds = new ArrayList<>();
+		if (config.clipDeaths()) { kinds.add("deaths"); }
+		if (config.clipDrops() && config.recordMoments()) { kinds.add("big drops"); }
+		if (config.clipLevels()) { kinds.add("level-ups"); }
+		if (config.clipPets() && config.recordMoments()) { kinds.add("pets"); }
+		if (config.clipKills() && config.recordMoments()) { kinds.add("boss kills"); }
+		if (kinds.isEmpty()) { return "Clips are off. Turn them on under Always clip in the settings."; }
+		String list = kinds.size() == 1 ? kinds.get(0)
+			: String.join(", ", kinds.subList(0, kinds.size() - 1)) + " and " + kinds.get(kinds.size() - 1);
+		return "Clipping your " + list + ".";
 	}
 
 	/** The clip key: marks the last moments as a clip in the recording, on the client thread. */
@@ -810,6 +911,8 @@ public class EmbertidePlugin extends Plugin
 		{
 			OsrsCapture current = capture;
 			if (current != null && current.recording() && current.clipMark(config.clipSeconds())) { clippedAt = nanos.getAsLong(); }
+			// With Always clip on, the key saves a clip of its own too, recording or not.
+			clips.clipKey();
 		});
 	}
 
@@ -935,6 +1038,7 @@ public class EmbertidePlugin extends Plugin
 		sceneIdentity = SceneIdentity.of(view);
 		OsrsCapture current = capture;
 		if (current != null) { current.sceneChanged(view); }
+		clips.sceneChanged(view);
 		rediscover = true;
 	}
 

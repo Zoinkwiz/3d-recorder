@@ -913,6 +913,12 @@ public final class OsrsCapture
 		return recording;
 	}
 
+	/** Recording, past its first scene. */
+	public boolean opened()
+	{
+		return recording && !armed;
+	}
+
 	public String reason()
 	{
 		return reason;

@@ -12,6 +12,9 @@ public interface EmbertideConfig extends Config
 {
 	String GROUP = "embertide";
 
+	@ConfigSection(name = "Always clip", description = "Save a short clip of each of these, whether or not you are recording. Recent play is kept in memory and only saved when one happens.", position = 8)
+	String CLIPS = "clips";
+
 	@ConfigSection(name = "Boss fights", description = "Mark your boss fights in the recording, or record only them.", position = 9)
 	String FIGHTS = "fights";
 
@@ -114,12 +117,12 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Record when you log in",
-		description = "Start recording when you log in. Turn off to start it yourself from the side panel.",
+		description = "Start recording every time you log in. Off until you turn it on: press Start recording in the side panel instead.",
 		position = 8
 	)
 	default boolean recordOnLogin()
 	{
-		return true;
+		return false;
 	}
 
 	/** Set once the player has answered the side panel's question about recording on login. */
@@ -269,5 +272,56 @@ public interface EmbertideConfig extends Config
 	default boolean viewerScenery()
 	{
 		return true;
+	}
+
+	@ConfigItem(keyName = "clipDeaths", name = "Your deaths", description = "Save a clip each time you die, with the hits that led to it.", position = 1, section = CLIPS)
+	default boolean clipDeaths()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "clipDrops", name = "Big drops", description = "Save a clip of each drop worth at least the amount below. Needs Record drops and milestones.", position = 2, section = CLIPS)
+	default boolean clipDrops()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "clipDropValue", name = "Drop worth at least", description = "The Grand Exchange value, in coins, a drop needs to be clipped.", position = 3, section = CLIPS)
+	@Range(min = 1)
+	default int clipDropValue()
+	{
+		return 1_000_000;
+	}
+
+	@ConfigItem(keyName = "clipLevels", name = "Level-ups", description = "Save a clip of each level you gain.", position = 4, section = CLIPS)
+	default boolean clipLevels()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "clipPets", name = "Pets and collection log", description = "Save a clip of each pet and new collection log slot. Needs Record drops and milestones.", position = 5, section = CLIPS)
+	default boolean clipPets()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "clipKills", name = "Boss kills", description = "Save a clip of each boss kill the game counts. Needs Record drops and milestones.", position = 6, section = CLIPS)
+	default boolean clipKills()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "clipBefore", name = "Seconds before", description = "How much of what led up to it a clip shows.", position = 7, section = CLIPS)
+	@Range(min = 5, max = 60)
+	default int clipBefore()
+	{
+		return 20;
+	}
+
+	@ConfigItem(keyName = "clipAfter", name = "Seconds after", description = "How much of what came after it a clip shows.", position = 8, section = CLIPS)
+	@Range(min = 2, max = 30)
+	default int clipAfter()
+	{
+		return 5;
 	}
 }

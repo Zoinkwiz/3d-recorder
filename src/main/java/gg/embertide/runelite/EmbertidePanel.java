@@ -32,7 +32,11 @@ public final class EmbertidePanel extends PluginPanel
 	private final JPanel files = new JPanel();
 	private final JPanel choice = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
-	private final JButton folder = new JButton("Show my recordings");
+	private final JButton clip = new JButton("Save a clip");
+	private final JTextArea clipsLine = text("");
+	/** Parts shown before "Show N earlier"; every part once that is pressed. */
+	static final int PARTS_SHOWN = 3;
+	private boolean allParts;
 	private final JButton retry = new JButton("Retry saving");
 	private final JButton discard = new JButton("Discard unsaved recording");
 	private final Timer refresh;
@@ -40,6 +44,7 @@ public final class EmbertidePanel extends PluginPanel
 	private final MaterialTab watchTab;
 	// GridLayout keeps room for hidden buttons, so Retry and Discard are added only while they apply.
 	private final JPanel actions = new JPanel(new GridLayout(0, 1, 0, 6));
+	private final JPanel buttons = new JPanel(new GridLayout(1, 2, 6, 0));
 	private Boolean recoverShown;
 	private String drawn = "";
 	private final EmbertidePlugin plugin;
@@ -57,10 +62,23 @@ public final class EmbertidePanel extends PluginPanel
 		headline.setFont(headline.getFont().deriveFont(Font.BOLD, headline.getFont().getSize2D() + 2f));
 		headline.setAlignmentX(LEFT_ALIGNMENT);
 		headline.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+		headline.setToolTipText("Other players are recorded as unnamed figures.");
 		top.add(headline);
-		JTextArea where = text("Play as normal. When you're done, open your session in the Embertide app or at");
-		top.add(where);
-		top.add(studioLink("embertide.gg/studio"));
+		status.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
+		top.add(status);
+		buttons.setOpaque(false);
+		buttons.setAlignmentX(LEFT_ALIGNMENT);
+		toggle.addActionListener(e -> plugin.toggleRecording());
+		clip.addActionListener(e -> plugin.clipThat());
+		clip.setToolTipText("Saves the last moments as a clip, recording or not. Your Clip that hotkey does the same.");
+		buttons.add(toggle);
+		buttons.add(clip);
+		top.add(buttons);
+		clipsLine.setFont(clipsLine.getFont().deriveFont(clipsLine.getFont().getSize2D() - 1f));
+		clipsLine.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		clipsLine.setAlignmentX(LEFT_ALIGNMENT);
+		clipsLine.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
+		top.add(clipsLine);
 		JPanel record = new JPanel(new BorderLayout(0, 8));
 		record.setOpaque(false);
 		record.add(top, BorderLayout.NORTH);
@@ -91,8 +109,7 @@ public final class EmbertidePanel extends PluginPanel
 		choice.add(text("You can change this later in the plugin's settings, under Record when you log in."));
 		choice.setVisible(false);
 		middle.add(choice);
-		status.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
-		middle.add(status);
+		middle.add(Box.createVerticalStrut(10));
 		files.setLayout(new BoxLayout(files, BoxLayout.Y_AXIS));
 		files.setOpaque(false);
 		files.setAlignmentX(LEFT_ALIGNMENT);
@@ -101,8 +118,7 @@ public final class EmbertidePanel extends PluginPanel
 		record.add(middle, BorderLayout.CENTER);
 
 		actions.setOpaque(false);
-		toggle.addActionListener(e -> plugin.toggleRecording());
-		folder.addActionListener(e -> {
+		JLabel folder = link("Show my recordings", () -> {
 			JTextArea path = new JTextArea(plugin.folderPath());
 			path.setEditable(false);
 			path.setLineWrap(true);
@@ -122,7 +138,15 @@ public final class EmbertidePanel extends PluginPanel
 			}
 		});
 		showRecover(false);
-		record.add(actions, BorderLayout.SOUTH);
+		JPanel foot = new JPanel();
+		foot.setLayout(new BoxLayout(foot, BoxLayout.Y_AXIS));
+		foot.setOpaque(false);
+		foot.add(actions);
+		foot.add(Box.createVerticalStrut(8));
+		folder.setAlignmentX(LEFT_ALIGNMENT);
+		foot.add(folder);
+		foot.add(studioLink("Open Studio"));
+		record.add(foot, BorderLayout.SOUTH);
 
 		JPanel display = new JPanel(new BorderLayout());
 		display.setOpaque(false);
@@ -164,61 +188,81 @@ public final class EmbertidePanel extends PluginPanel
 		}
 		toggle.setText(state.recording ? "Stop recording" : "Start recording");
 		toggle.setEnabled(state.canToggle);
+		clip.setEnabled(state.canClip);
+		if (!state.clipsLine.equals(clipsLine.getText()))
+		{
+			clipsLine.setText(state.clipsLine);
+		}
+		status.setVisible(!state.text.isEmpty());
 		showRecover(plugin.canRecover());
-		drawFiles(state.current, state.saved);
+		drawFiles(state.current, state.saved, state.clips);
 	}
 
-	private void drawFiles(String current, List<EmbertidePlugin.SavedFile> saved)
+	private void drawFiles(String current, List<EmbertidePlugin.SavedFile> saved, List<EmbertidePlugin.SavedFile> clips)
 	{
-		StringBuilder key = new StringBuilder(current);
-		for (EmbertidePlugin.SavedFile file : saved)
-		{
-			key.append('|').append(file.name);
-		}
+		StringBuilder key = new StringBuilder(current).append('|').append(allParts);
+		for (EmbertidePlugin.SavedFile file : saved) { key.append('|').append(file.name); }
+		for (EmbertidePlugin.SavedFile file : clips) { key.append("|c").append(file.name); }
 		if (key.toString().equals(drawn))
 		{
 			return;
 		}
 		drawn = key.toString();
 		files.removeAll();
-		if (current.isEmpty() && saved.isEmpty())
+		if (!clips.isEmpty())
 		{
-			files.revalidate();
-			files.repaint();
-			return;
-		}
-		if (current.isEmpty())
-		{
-			// After a stop, the next step comes before the list.
-			JLabel next = new JLabel("Next");
-			next.setFont(next.getFont().deriveFont(Font.BOLD));
-			next.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			next.setAlignmentX(LEFT_ALIGNMENT);
-			files.add(next);
-			JTextArea how = text("Watch a part below in your house, or open Studio and drag your recording in.");
-			how.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-			files.add(how);
-			files.add(studioLink("Open in Studio"));
+			files.add(heading("Clips"));
+			for (int i = clips.size() - 1; i >= 0; i--)
+			{
+				EmbertidePlugin.SavedFile file = clips.get(i);
+				files.add(row(file.title, clock(file.seconds), () -> watch(file.name)));
+			}
 			files.add(Box.createVerticalStrut(10));
 		}
-		JLabel heading = new JLabel("This session");
-		heading.setFont(heading.getFont().deriveFont(Font.BOLD));
-		heading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		heading.setAlignmentX(LEFT_ALIGNMENT);
-		files.add(heading);
-		files.add(Box.createVerticalStrut(4));
-		if (!current.isEmpty())
+		if (!current.isEmpty() || !saved.isEmpty())
 		{
-			files.add(row(current, "recording now", null));
-		}
-		for (int i = saved.size() - 1; i >= 0; i--)
-		{
-			EmbertidePlugin.SavedFile file = saved.get(i);
-			int seconds = (int) file.seconds;
-			files.add(row(file.name, String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60), () -> watch(file.name)));
+			files.add(heading("This session"));
+			if (!current.isEmpty())
+			{
+				files.add(row(partName(current, "Now"), "recording", null));
+			}
+			int shown = 0;
+			for (int i = saved.size() - 1; i >= 0 && (allParts || shown < PARTS_SHOWN); i--, shown++)
+			{
+				EmbertidePlugin.SavedFile file = saved.get(i);
+				files.add(row(partName(file.name, "Part"), clock(file.seconds), () -> watch(file.name)));
+			}
+			int hidden = saved.size() - shown;
+			if (hidden > 0)
+			{
+				files.add(link("Show " + hidden + " earlier", () -> { allParts = true; render(); }));
+			}
 		}
 		files.revalidate();
 		files.repaint();
+	}
+
+	/** A part by the time it began, from its file name ("osrs-20261031-2131-…" reads "From 21:31"). */
+	static String partName(String file, String otherwise)
+	{
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("^osrs-\\d{8}-(\\d{2})(\\d{2})").matcher(file);
+		return m.find() ? "From " + m.group(1) + ":" + m.group(2) : otherwise;
+	}
+
+	static String clock(double seconds)
+	{
+		int s = (int) Math.max(0, seconds);
+		return String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60);
+	}
+
+	private static JLabel heading(String words)
+	{
+		JLabel heading = new JLabel(words);
+		heading.setFont(heading.getFont().deriveFont(Font.BOLD));
+		heading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		heading.setAlignmentX(LEFT_ALIGNMENT);
+		heading.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+		return heading;
 	}
 
 	private void watch(String name)
@@ -230,23 +274,28 @@ public final class EmbertidePanel extends PluginPanel
 
 	private static JPanel row(String name, String note, Runnable watch)
 	{
-		JPanel row = new JPanel();
-		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+		JPanel row = new JPanel(new BorderLayout(6, 0));
 		row.setOpaque(false);
 		row.setAlignmentX(LEFT_ALIGNMENT);
-		row.setBorder(BorderFactory.createEmptyBorder(2, 0, 4, 0));
-		JLabel file = new JLabel(name);
-		file.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		file.setToolTipText(name);
+		row.setBorder(BorderFactory.createEmptyBorder(1, 0, 3, 0));
+		JLabel label = new JLabel(name);
+		label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		label.setToolTipText(name);
+		row.add(label, BorderLayout.CENTER);
+		JPanel right = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+		right.setOpaque(false);
 		JLabel detail = new JLabel(note);
-		detail.setFont(detail.getFont().deriveFont(detail.getFont().getSize2D() - 1f));
 		detail.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		row.add(file);
-		row.add(detail);
+		right.add(detail);
 		if (watch != null)
 		{
-			row.add(link("Watch in your house", watch));
+			JLabel open = link("Watch", watch);
+			open.setToolTipText("Watch it in your house.");
+			right.add(open);
 		}
+		row.add(right, BorderLayout.EAST);
+		// BoxLayout stretches a row to the height it is given; one line is all it needs.
+		row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 		return row;
 	}
 
@@ -282,13 +331,12 @@ public final class EmbertidePanel extends PluginPanel
 		}
 		recoverShown = recover;
 		actions.removeAll();
-		actions.add(toggle);
 		if (recover)
 		{
 			actions.add(retry);
 			actions.add(discard);
 		}
-		actions.add(folder);
+		actions.setVisible(recover);
 		actions.revalidate();
 	}
 
