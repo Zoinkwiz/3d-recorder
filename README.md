@@ -159,6 +159,24 @@ points at their unnamed figure), leaves out what you click in the chatbox,
 private chat and social screens, and records nothing while the bank PIN is
 open.
 
+## Always clip
+
+**Always clip** saves a short clip each time something you ticked happens,
+whether or not you are recording: your deaths, drops worth at least an amount
+you choose, level-ups, pets and collection log slots, and boss kills. Each one
+is off until you turn it on.
+
+With any of them on, the plugin keeps the last few seconds of play in memory,
+recorded the same way as a recording with your settings. When one of them
+happens, it saves a clip of the seconds before and after (20 and 5 unless you
+change them) to its folder, named after what happened. Studio opens it like any
+recording. Nothing is written while nothing happens, and what is kept in memory
+is let go every minute or so. With Always clip on, the Clip that hotkey saves a
+clip too.
+
+Drops, pets, collection log slots and boss kills come from the drops and
+milestones the plugin records, so they need **Record drops and milestones** on.
+
 ## Privacy
 
 The plugin doesn't connect to anything. It writes your recording to a
