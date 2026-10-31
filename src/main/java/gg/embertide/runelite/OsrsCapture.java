@@ -1423,7 +1423,7 @@ public final class OsrsCapture
 			JsonObject payload = new JsonObject();
 			payload.addProperty("dimension", session.dimension);
 			payload.add("icons", icons);
-			if (emit("osrs.head_icons", t, payload, PLAYER)) { headIconCount += icons.size(); }
+			if (emit(RowTypes.HEAD_ICONS, t, payload, PLAYER)) { headIconCount += icons.size(); }
 		}
 		if (recording) { bossHp(me, t); }
 		if (recording && scene != null)
@@ -2157,7 +2157,11 @@ public final class OsrsCapture
 		emit("osrs.audio", t, payload, PLAYER);
 	}
 
-	/** Adds [id, prayer, skull, archive and sprite pairs] to changed, made on first use, when they differ from the last written. */
+	/**
+	 * Adds [id, prayer, skull, archive and sprite pairs] to changed, made on first use, when they differ from the last written:
+	 * the icons over each head as the client showed them at that moment, so a replay in Embertide Studio looks like the game did.
+	 * Nothing is worked out from them and nothing is shown in game: the in-game viewer skips these rows (RowTypes.NOT_SHOWN_IN_GAME).
+	 */
 	private JsonArray headIcon(JsonArray changed, Actor actor, String id)
 	{
 		int prayer = -1, skull = -1, pairs = 0;

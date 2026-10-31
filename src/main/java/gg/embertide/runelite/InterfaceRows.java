@@ -20,10 +20,12 @@ import net.runelite.api.gameval.VarbitID;
 /**
  * The player's own interface, recorded only with Record the game interface on: each row at its change,
  * and whole when a part opens, since a part starts with nothing written. Never anyone else's; the bank and other open interfaces are WidgetRows.
+ * It is what the player's own screen showed, kept so Embertide Studio can draw the interface in a replay afterwards, outside the client;
+ * none of it is shown in game (RowTypes.NOT_SHOWN_IN_GAME).
  */
 final class InterfaceRows
 {
-	static final String INVENTORY = "osrs.inventory", EQUIPMENT = "osrs.equipment", PRAYERS = "osrs.prayers";
+	static final String INVENTORY = "osrs.inventory", EQUIPMENT = "osrs.equipment", PRAYERS = RowTypes.PRAYERS;
 	static final String SPELLBOOK = "osrs.spellbook", LAYOUT = "osrs.interface", CHATBOX = "osrs.chatbox";
 
 	/** The chatbox lines kept, by kind; anything else (other players, private, clan, friends, trades, broadcasts) is never read. */

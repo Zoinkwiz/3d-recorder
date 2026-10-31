@@ -90,6 +90,17 @@ it to watch with the house showing.
 A recording saves the ground as you saw it. If one holds the floor only near
 where you walked, or no floor at all, the panel says which.
 
+## What the plugin shows in game
+
+While you play, the plugin draws only its recording light. It shows nothing
+about other players or NPCs: no prayers, health or anything else it records.
+A recording is for watching back afterwards, in Studio in your browser or the
+Embertide app, outside the game.
+
+In your house, the Watch tab shows a recording's figures, scenery and ground,
+nothing more. It never shows the prayers, hits, health bars, interfaces, chat
+or clicks a recording holds.
+
 ## What is recorded
 
 - Where you and the NPCs and players around you move, what they look like

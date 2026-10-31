@@ -122,7 +122,8 @@ final class RecordingReader
 							scene = new Scene(t, str(p, "dimension", scene.dimension));
 							recording.scenes.add(scene);
 						}
-						else
+						// The house replay draws figures, scenery and ground only; prayers, hits, interfaces and the rest stay out.
+						else if (!RowTypes.NOT_SHOWN_IN_GAME.contains(type))
 						{
 							parse(recording, scene, type, str(row, "user_id", "player"), t, p);
 						}
