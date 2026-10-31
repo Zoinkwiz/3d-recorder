@@ -719,7 +719,72 @@ public final class OsrsCapture
 		payload.addProperty("tick", client.getTickCount());
 		payload.addProperty("cycle", client.getGameCycle());
 		payload.addProperty("dimension", session.dimension);
-		if (emit("osrs.click", session.time(), payload, PLAYER)) { clickCount++; }
+		flushWalk();
+		// Only the map's own view: a boat's scene tiles are the boat's, not the map's.
+		WorldView view = client.getTopLevelWorldView();
+		if (view == null || entry.getWorldViewId() != view.getId()) { emitClick(payload, session.time()); return; }
+		int[] scene = clickedSceneTile(type, entry.getParam0(), entry.getParam1(), view.getSizeX(), view.getSizeY());
+		if (scene != null) { payload.add("tile", point(view.getBaseX() + scene[0], view.getBaseY() + scene[1], view.getPlane())); }
+		if (type == MenuAction.WALK)
+		{
+			// The client picks a walk's tile as it draws the next frame, so the click waits for its destination.
+			pendingWalk = payload;
+			pendingWalkTime = session.time();
+			pendingWalkFrom = client.getLocalDestinationLocation();
+			pendingWalkFrames = WALK_WAIT_FRAMES;
+			return;
+		}
+		emitClick(payload, session.time());
+	}
+
+	/** Client frames a walk click waits for the client to set where the player walks to. */
+	static final int WALK_WAIT_FRAMES = 5;
+	private JsonObject pendingWalk;
+	private double pendingWalkTime;
+	private LocalPoint pendingWalkFrom;
+	private int pendingWalkFrames;
+
+	/**
+	 * The scene tile a menu action names in its params, [x, y], for an object or a ground item; null for anything else,
+	 * whose params are not a tile (a walk's are the pointer), or a tile outside the scene.
+	 */
+	static int[] clickedSceneTile(MenuAction type, int param0, int param1, int sizeX, int sizeY)
+	{
+		if (type == null) { return null; }
+		String name = type.name();
+		boolean tile = name.startsWith("GAME_OBJECT_") || name.startsWith("GROUND_ITEM_") || type == MenuAction.EXAMINE_OBJECT
+			|| type == MenuAction.EXAMINE_ITEM_GROUND || type == MenuAction.WIDGET_TARGET_ON_GAME_OBJECT
+			|| type == MenuAction.WIDGET_TARGET_ON_GROUND_ITEM;
+		return tile && param0 >= 0 && param1 >= 0 && param0 < sizeX && param1 < sizeY ? new int[]{param0, param1} : null;
+	}
+
+	/** Writes a waiting walk click once the client set its destination, or after a few frames with what it has. */
+	private void walkFrame()
+	{
+		if (pendingWalk == null) { return; }
+		LocalPoint to = client.getLocalDestinationLocation();
+		if (--pendingWalkFrames > 0 && (to == null || to.equals(pendingWalkFrom))) { return; }
+		flushWalk();
+	}
+
+	private void flushWalk()
+	{
+		JsonObject payload = pendingWalk;
+		if (payload == null) { return; }
+		pendingWalk = null;
+		WorldView view = client.getTopLevelWorldView();
+		LocalPoint to = client.getLocalDestinationLocation();
+		if (view != null && to != null && to.getWorldView() == view.getId())
+		{
+			WorldPoint tile = WorldPoint.fromLocal(view, to.getX(), to.getY(), view.getPlane());
+			payload.add("tile", point(tile));
+		}
+		emitClick(payload, pendingWalkTime);
+	}
+
+	private void emitClick(JsonObject payload, double t)
+	{
+		if (emit("osrs.click", t, payload, PLAYER)) { clickCount++; }
 	}
 
 	/** A chatbox line, with Record the game interface on; only the kinds InterfaceRows keeps, never another player's. */
@@ -1166,7 +1231,8 @@ public final class OsrsCapture
 		{
 			osrs.addProperty("clicks", "Recorded because Record your clicks is on: osrs.click for each menu option the player chose, {option, action: the menu action type, "
 				+ "actor: the recorded figure it was on, target: the menu's target text without tags, group: the interface group clicked in, item, object: the object id, "
-				+ "at: [x, y] on the canvas, panel: the open side tab, tick: the game tick, cycle: the client cycle}, at most " + MAX_EVENTS + " a part. "
+				+ "at: [x, y] on the canvas, tile: [x, y, plane] the world tile an object, ground item or walk click was on (none on a boat's deck), "
+				+ "panel: the open side tab, tick: the game tick, cycle: the client cycle}, at most " + MAX_EVENTS + " a part. "
 				+ "Never typed text, and nothing while the bank PIN, name entry or report screens are open; a player is named only by their figure, "
 				+ "and a target inside the chatbox, private chat or a social screen is left out.");
 		}
@@ -1445,6 +1511,7 @@ public final class OsrsCapture
 
 	public void clientTick()
 	{
+		walkFrame();
 		if (!acceptingEvents())
 		{
 			return;
