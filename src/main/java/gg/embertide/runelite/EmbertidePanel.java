@@ -33,7 +33,6 @@ public final class EmbertidePanel extends PluginPanel
 	private final JPanel choice = new JPanel();
 	private final JButton toggle = new JButton("Stop recording");
 	private final JButton clip = new JButton("Save last 20s");
-	private final JTextArea clipsLine = text("");
 	/** Parts shown before "Show N earlier"; every part once that is pressed. */
 	static final int PARTS_SHOWN = 3;
 	private boolean allParts;
@@ -73,9 +72,6 @@ public final class EmbertidePanel extends PluginPanel
 		buttons.add(toggle);
 		buttons.add(clip);
 		top.add(buttons);
-		clipsLine.setAlignmentX(LEFT_ALIGNMENT);
-		clipsLine.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
-		top.add(clipsLine);
 		JPanel record = new JPanel(new BorderLayout(0, 8));
 		record.setOpaque(false);
 		record.add(top, BorderLayout.NORTH);
@@ -192,10 +188,6 @@ public final class EmbertidePanel extends PluginPanel
 			clip.setText(label);
 			clip.setToolTipText("Saves a recording of the last " + state.clipBefore + " seconds and the " + state.clipAfter
 				+ " after you press it, whether you are recording or not. Your Clip that hotkey does the same.");
-		}
-		if (!state.clipsLine.equals(clipsLine.getText()))
-		{
-			clipsLine.setText(state.clipsLine);
 		}
 		status.setVisible(!state.text.isEmpty());
 		showRecover(plugin.canRecover());

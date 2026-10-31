@@ -69,6 +69,10 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.input.KeyManager;
@@ -124,7 +128,6 @@ public class EmbertidePlugin extends Plugin
 		final boolean askLoginChoice;
 		/** Always clip: the clips saved since the plugin started, what it saves, and whether Save a clip can save one now. */
 		List<SavedFile> clips = List.of();
-		String clipsLine = "";
 		boolean canClip;
 		/** Seconds a clip keeps before and after what set it off. */
 		int clipBefore, clipAfter;
@@ -162,6 +165,8 @@ public class EmbertidePlugin extends Plugin
 	@Inject
 	private ItemManager itemManager;
 	@Inject
+	private ChatMessageManager chatMessageManager;
+	@Inject
 	private KeyManager keyManager;
 	@Inject
 	private OverlayManager overlayManager;
@@ -175,8 +180,8 @@ public class EmbertidePlugin extends Plugin
 	private volatile OsrsCapture capture;
 	/** Always clip: recent play in memory, saved as a clip when something the player ticked happens. Client thread. */
 	private final ClipBuffers clips = new ClipBuffers(() -> this.nanos.getAsLong(), this::clipCapture, this::clipFile,
-		title -> notice = "Saving a clip: " + title + ".",
-		(title, file, seconds) -> this.savedClips.add(new SavedFile(fileName(file, title), seconds, title)));
+		title -> { },
+		this::clipSaved);
 	private volatile String notice = "Ready to record.";
 	private boolean rediscover = true;
 	private SceneIdentity sceneIdentity;
@@ -883,26 +888,26 @@ public class EmbertidePlugin extends Plugin
 	{
 		state.clips = new ArrayList<>(savedClips);
 		state.canClip = clips.running();
-		state.clipsLine = clipsLine();
 		state.clipBefore = config.clipBefore();
 		state.clipAfter = config.clipAfter();
 		return state;
 	}
 
-	/** "A clip is saved each time you die or level up.", or how to turn them on. */
-	private String clipsLine()
+	/** A clip's file is written: listed in the panel, and said in the game's chat unless the player turned that off. */
+	private void clipSaved(String title, Recorder file, double seconds)
 	{
-		List<String> kinds = new ArrayList<>();
-		if (config.clipDeaths()) { kinds.add("die"); }
-		if (config.clipDrops() && config.recordMoments()) { kinds.add("get a big drop"); }
-		if (config.clipLevels()) { kinds.add("level up"); }
-		if (config.clipPets() && config.recordMoments()) { kinds.add("get a pet or a collection log slot"); }
-		if (config.clipKills() && config.recordMoments()) { kinds.add("kill a boss"); }
-		if (kinds.isEmpty()) { return "No clips are saved by themselves. Turn them on under Always clip in the settings."; }
-		String list = kinds.size() == 1 ? kinds.get(0)
-			: String.join(", ", kinds.subList(0, kinds.size() - 1)) + " or " + kinds.get(kinds.size() - 1);
-		return "A clip is saved each time you " + list + ", recording or not.";
+		String name = fileName(file, title);
+		savedClips.add(new SavedFile(name, seconds, title));
+		if (!config.clipChatMessage() || chatMessageManager == null) { return; }
+		chatMessageManager.queue(QueuedMessage.builder()
+			.type(ChatMessageType.CONSOLE)
+			.runeLiteFormattedMessage(new ChatMessageBuilder()
+				.append(ChatColorType.HIGHLIGHT).append("Clip saved: " + title)
+				.append(ChatColorType.NORMAL).append(" (" + name + ")")
+				.build())
+			.build());
 	}
+
 
 	/** The clip key: marks the last moments as a clip in the recording, on the client thread. */
 	void clipThat()

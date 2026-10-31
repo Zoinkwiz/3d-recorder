@@ -175,7 +175,8 @@ With any of them on, the plugin keeps the last few seconds of play in memory,
 recorded the same way as a recording with your settings. When one of them
 happens, it saves a clip of the seconds before and after (20 and 5 unless you
 change them) to its folder, named after what happened. Studio opens it like any
-recording. Nothing is written while nothing happens, and what is kept in memory
+recording. The game's chat says when a clip is saved and what its file is called;
+turn off **Tell me in chat** to keep it quiet. Nothing is written while nothing happens, and what is kept in memory
 is let go every minute or so. With Always clip on, the Clip that hotkey saves a
 clip too.
 
