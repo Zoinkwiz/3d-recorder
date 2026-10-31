@@ -311,6 +311,12 @@ public interface EmbertideConfig extends Config
 		return false;
 	}
 
+	@ConfigItem(keyName = "clipChatMessage", name = "Tell me in chat", description = "Say in the game's chat when a clip is saved, and what its file is called.", position = 9, section = CLIPS)
+	default boolean clipChatMessage()
+	{
+		return true;
+	}
+
 	@ConfigItem(keyName = "clipBefore", name = "Seconds before", description = "How much of what led up to it a clip shows.", position = 7, section = CLIPS)
 	@Range(min = 5, max = 60)
 	default int clipBefore()
