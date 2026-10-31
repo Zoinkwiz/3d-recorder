@@ -97,10 +97,18 @@ public class EmbertidePlugin extends Plugin
 	{
 		final String name;
 		final double seconds;
+		/** A clip's title ("Died to Vorkath"); null for a part of a recording. */
+		final String title;
 		SavedFile(String name, double seconds)
+		{
+			this(name, seconds, null);
+		}
+
+		SavedFile(String name, double seconds, String title)
 		{
 			this.name = name;
 			this.seconds = seconds;
+			this.title = title;
 		}
 	}
 
@@ -114,6 +122,10 @@ public class EmbertidePlugin extends Plugin
 		final boolean canToggle;
 		/** Whether the panel still asks if recording starts at every login. */
 		final boolean askLoginChoice;
+		/** Always clip: the clips saved since the plugin started, what it saves, and whether Save a clip can save one now. */
+		List<SavedFile> clips = List.of();
+		String clipsLine = "";
+		boolean canClip;
 		PanelState(String headline, String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle,
 			boolean askLoginChoice)
 		{
@@ -161,7 +173,8 @@ public class EmbertidePlugin extends Plugin
 	private volatile OsrsCapture capture;
 	/** Always clip: recent play in memory, saved as a clip when something the player ticked happens. Client thread. */
 	private final ClipBuffers clips = new ClipBuffers(() -> this.nanos.getAsLong(), this::clipCapture, this::clipFile,
-		title -> notice = "Clip saved: " + title + ".");
+		title -> notice = "Saving a clip: " + title + ".",
+		(title, file, seconds) -> this.savedClips.add(new SavedFile(fileName(file, title), seconds, title)));
 	private volatile String notice = "Ready to record.";
 	private boolean rediscover = true;
 	private SceneIdentity sceneIdentity;
@@ -203,6 +216,7 @@ public class EmbertidePlugin extends Plugin
 	private String fightList;
 	private Set<String> fightNames = Set.of();
 	private final List<SavedFile> saved = new CopyOnWriteArrayList<>();
+	private final List<SavedFile> savedClips = new CopyOnWriteArrayList<>();
 	private final HotkeyListener hotkey = new HotkeyListener(() -> config.recordHotkey())
 	{
 		@Override
@@ -848,8 +862,8 @@ public class EmbertidePlugin extends Plugin
 			{
 				text.append("\n\nWhat you played so far is kept. Press Start recording to carry on with the same recording; logging out ends it.");
 			}
-			return new PanelState(handingOff ? "Saving…" : "Not recording", text.toString(), "", files, handingOff && resume,
-				in && !recover && (pending == null || handingOff), !config.loginChoiceMade());
+			return withClips(new PanelState(handingOff ? "Saving…" : "Not recording", text.toString().trim(), "", files, handingOff && resume,
+				in && !recover && (pending == null || handingOff), !config.loginChoiceMade()));
 		}
 		// The headline carries the time, so only the capture's other states are repeated here.
 		String line = current.status();
@@ -862,13 +876,32 @@ public class EmbertidePlugin extends Plugin
 		{
 			text.append("Cannot save: ").append(recorder.error());
 		}
-		else
-		{
-			text.append("Other players are recorded as unnamed figures.");
-		}
 		boolean recording = current.recording();
 		String headline = recording ? "Recording · " + clock(earlier + current.seconds()) : "Not recording";
-		return new PanelState(headline, text.toString(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade());
+		return withClips(new PanelState(headline, text.toString().trim(), fileName(recorder, ""), files, recording, recording, !config.loginChoiceMade()));
+	}
+
+	private PanelState withClips(PanelState state)
+	{
+		state.clips = new ArrayList<>(savedClips);
+		state.canClip = clips.running();
+		state.clipsLine = clipsLine();
+		return state;
+	}
+
+	/** "Saving clips of your deaths and level-ups.", or how to turn them on. */
+	private String clipsLine()
+	{
+		List<String> kinds = new ArrayList<>();
+		if (config.clipDeaths()) { kinds.add("deaths"); }
+		if (config.clipDrops() && config.recordMoments()) { kinds.add("big drops"); }
+		if (config.clipLevels()) { kinds.add("level-ups"); }
+		if (config.clipPets() && config.recordMoments()) { kinds.add("pets"); }
+		if (config.clipKills() && config.recordMoments()) { kinds.add("boss kills"); }
+		if (kinds.isEmpty()) { return "Clips are off. Turn them on under Always clip in the settings."; }
+		String list = kinds.size() == 1 ? kinds.get(0)
+			: String.join(", ", kinds.subList(0, kinds.size() - 1)) + " and " + kinds.get(kinds.size() - 1);
+		return "Clipping your " + list + ".";
 	}
 
 	/** The clip key: marks the last moments as a clip in the recording, on the client thread. */

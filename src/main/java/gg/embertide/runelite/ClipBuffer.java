@@ -44,6 +44,9 @@ final class ClipBuffer implements Recorder
 
 	synchronized boolean kept() { return file != null; }
 
+	/** The file it is kept in, or null. */
+	synchronized Recorder file() { return file; }
+
 	@Override
 	public synchronized CompletableFuture<Void> open(JsonObject header)
 	{

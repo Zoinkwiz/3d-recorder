@@ -33,6 +33,8 @@ final class ClipBuffers
 		final ClipBuffer buffer;
 		final long startedNanos;
 		boolean rediscover = true;
+		/** Once kept: what the clip is called. */
+		String title = "";
 		/** Once kept: when the clip began on the wall clock, and when it ends. */
 		long clipFromNanos = -1, keepUntilNanos = -1;
 
@@ -44,6 +46,12 @@ final class ClipBuffers
 		}
 
 		boolean kept() { return keepUntilNanos >= 0; }
+	}
+
+	/** A clip saved to its file: its title, the file's recorder and its length in seconds. Called off the client thread. */
+	interface Sealed
+	{
+		void accept(String title, Recorder file, double seconds);
 	}
 
 	/** Makes a capture into memory: the buffer to write into, and the capture, already started. */
@@ -58,18 +66,21 @@ final class ClipBuffers
 	/** A file recorder named after the clip's reason. */
 	private final Function<String, Recorder> files;
 	private final Consumer<String> saved;
+	private final Sealed sealed;
 	private ClipTriggers.Wanted wanted;
 	private ClipTriggers.Trigger pending;
 	private long pendingNanos = -1;
 	private String lastReason = "";
 	private long lastNanos = Long.MIN_VALUE;
 
-	ClipBuffers(LongSupplier nanos, Factory factory, Function<String, Recorder> files, Consumer<String> saved)
+	/** `saved` is told a clip's title as it starts being kept, `sealed` once its file is written. */
+	ClipBuffers(LongSupplier nanos, Factory factory, Function<String, Recorder> files, Consumer<String> saved, Sealed sealed)
 	{
 		this.nanos = nanos;
 		this.factory = factory;
 		this.files = files;
 		this.saved = saved;
+		this.sealed = sealed;
 	}
 
 	/** The seconds of a rotation: twice the look-back, never under 20. */
@@ -258,6 +269,7 @@ final class ClipBuffers
 		}
 		oldest.clipFromNanos = at - (long) (atS * 1e9);
 		oldest.keepUntilNanos = Math.min(at + (long) (afterS * 1e9), oldest.clipFromNanos + (long) (MAX_CLIP_S * 1e9));
+		oldest.title = trigger.title;
 		if (saved != null) { saved.accept(trigger.title); }
 	}
 
@@ -271,7 +283,12 @@ final class ClipBuffers
 	private void seal(Slot slot, String why)
 	{
 		slots.remove(slot);
-		slot.capture.finish(why, false, true);
+		Recorder file = slot.buffer.file();
+		String title = slot.title;
+		slot.capture.finish(why, false, true).whenComplete((ignored, failed) ->
+		{
+			if (failed == null && file != null && sealed != null) { sealed.accept(title, file, slot.capture.seconds()); }
+		});
 	}
 
 	private void drop(Slot slot)

@@ -117,12 +117,12 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(
 		keyName = "recordOnLogin",
 		name = "Record when you log in",
-		description = "Start recording when you log in. Turn off to start it yourself from the side panel.",
+		description = "Start recording every time you log in. Off until you turn it on: press Start recording in the side panel instead.",
 		position = 8
 	)
 	default boolean recordOnLogin()
 	{
-		return true;
+		return false;
 	}
 
 	/** Set once the player has answered the side panel's question about recording on login. */
@@ -277,7 +277,7 @@ public interface EmbertideConfig extends Config
 	@ConfigItem(keyName = "clipDeaths", name = "Your deaths", description = "Save a clip each time you die, with the hits that led to it.", position = 1, section = CLIPS)
 	default boolean clipDeaths()
 	{
-		return false;
+		return true;
 	}
 
 	@ConfigItem(keyName = "clipDrops", name = "Big drops", description = "Save a clip of each drop worth at least the amount below. Needs Record drops and milestones.", position = 2, section = CLIPS)
