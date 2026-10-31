@@ -210,14 +210,15 @@ while I play**.
 
 ## Where the recordings are
 
-`.runelite/plugin-data/3d-recorder/`, one `.embertide` file per part of a
+`.runelite/plugin-data/3d-recorder/`, one `.e4d` file per part of a
 session, named with the date, time and your character's name, and the boss's
 name for a fight recorded on its own. **Show my recordings** in the side panel
 shows the full path.
 
-A `.embertide` file is an Embertide recording: drag it into
+A `.e4d` file is an Embertide recording: drag it into
 [embertide.gg/studio](https://embertide.gg/studio/), or the Embertide app finds
-it by itself. While a part is still recording it ends in `.embertide.partial`.
+it by itself. While a part is still recording it ends in `.e4d.partial`.
+Recordings from before are `.embertide` files, and open the same way.
 If saving a part fails, the side panel offers to retry.
 
 ## Questions and help

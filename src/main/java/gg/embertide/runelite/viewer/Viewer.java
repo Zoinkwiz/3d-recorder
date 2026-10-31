@@ -1,6 +1,7 @@
 package gg.embertide.runelite.viewer;
 
 import gg.embertide.runelite.EmbertideConfig;
+import gg.embertide.runelite.MccrFileRecorder;
 import java.awt.Component;
 import java.io.IOException;
 import java.util.Comparator;
@@ -205,7 +206,8 @@ public class Viewer
 	{
 		try (Stream<Filepath> files = folder.walk(1))
 		{
-			return files.filter(f -> f.getFileName().endsWith(".embertide") || f.getFileName().endsWith(".mccr"))
+			return files.filter(f -> f.getFileName().endsWith(MccrFileRecorder.EXTENSION) || f.getFileName().endsWith(".embertide")
+				|| f.getFileName().endsWith(".mccr"))
 				.sorted(Comparator.comparing(Viewer::modified).reversed()).map(Filepath::getFileName)
 				.collect(Collectors.toList());
 		}
