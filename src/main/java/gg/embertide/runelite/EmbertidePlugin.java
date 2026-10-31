@@ -126,6 +126,8 @@ public class EmbertidePlugin extends Plugin
 		List<SavedFile> clips = List.of();
 		String clipsLine = "";
 		boolean canClip;
+		/** Seconds a clip keeps before and after what set it off. */
+		int clipBefore, clipAfter;
 		PanelState(String headline, String text, String current, List<SavedFile> saved, boolean recording, boolean canToggle,
 			boolean askLoginChoice)
 		{
@@ -848,7 +850,7 @@ public class EmbertidePlugin extends Plugin
 			text.append(handingOff ? "Saving your recording." + (resume ? " Recording resumes after it is saved." : "")
 				: recover ? "Recording paused. The unsaved part is kept as a .partial file.\n\n"
 					+ pending.recorder().error() + "\n\nRetry saving, or discard it."
-				: stopped ? "Not recording." : notice);
+				: stopped ? "" : notice);
 			boolean in = loggedIn;
 			if (in && !stopped && !recover && !handingOff && config.fightsOnly() && fight == null)
 			{
@@ -857,10 +859,6 @@ public class EmbertidePlugin extends Plugin
 			if (!in)
 			{
 				text.append(resume ? "\n\nLog in to start recording." : "\n\nAfter you log in, press Start recording.");
-			}
-			else if (stopped && pending == null)
-			{
-				text.append("\n\nWhat you played so far is kept. Press Start recording to carry on with the same recording; logging out ends it.");
 			}
 			return withClips(new PanelState(handingOff ? "Saving…" : "Not recording", text.toString().trim(), "", files, handingOff && resume,
 				in && !recover && (pending == null || handingOff), !config.loginChoiceMade()));
@@ -886,22 +884,24 @@ public class EmbertidePlugin extends Plugin
 		state.clips = new ArrayList<>(savedClips);
 		state.canClip = clips.running();
 		state.clipsLine = clipsLine();
+		state.clipBefore = config.clipBefore();
+		state.clipAfter = config.clipAfter();
 		return state;
 	}
 
-	/** "Saving clips of your deaths and level-ups.", or how to turn them on. */
+	/** "A clip is saved each time you die or level up.", or how to turn them on. */
 	private String clipsLine()
 	{
 		List<String> kinds = new ArrayList<>();
-		if (config.clipDeaths()) { kinds.add("deaths"); }
-		if (config.clipDrops() && config.recordMoments()) { kinds.add("big drops"); }
-		if (config.clipLevels()) { kinds.add("level-ups"); }
-		if (config.clipPets() && config.recordMoments()) { kinds.add("pets"); }
-		if (config.clipKills() && config.recordMoments()) { kinds.add("boss kills"); }
-		if (kinds.isEmpty()) { return "Clips are off. Turn them on under Always clip in the settings."; }
+		if (config.clipDeaths()) { kinds.add("die"); }
+		if (config.clipDrops() && config.recordMoments()) { kinds.add("get a big drop"); }
+		if (config.clipLevels()) { kinds.add("level up"); }
+		if (config.clipPets() && config.recordMoments()) { kinds.add("get a pet or a collection log slot"); }
+		if (config.clipKills() && config.recordMoments()) { kinds.add("kill a boss"); }
+		if (kinds.isEmpty()) { return "No clips are saved by themselves. Turn them on under Always clip in the settings."; }
 		String list = kinds.size() == 1 ? kinds.get(0)
-			: String.join(", ", kinds.subList(0, kinds.size() - 1)) + " and " + kinds.get(kinds.size() - 1);
-		return "Clipping your " + list + ".";
+			: String.join(", ", kinds.subList(0, kinds.size() - 1)) + " or " + kinds.get(kinds.size() - 1);
+		return "A clip is saved each time you " + list + ", recording or not.";
 	}
 
 	/** The clip key: marks the last moments as a clip in the recording, on the client thread. */
