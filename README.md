@@ -153,7 +153,8 @@ login and welcome screens are never recorded.
 
 **Record your clicks** is off until you turn it on. With it on, the plugin
 also records each menu option you choose (like Chop down Tree), where you
-clicked on the game screen and the game tick, so Studio can show your clicks.
+clicked on the game screen, the tile you clicked or walked to, and the game
+tick, so Studio can show your clicks.
 It never records what you type, never names another player (a click on one
 points at their unnamed figure), leaves out what you click in the chatbox,
 private chat and social screens, and records nothing while the bank PIN is
