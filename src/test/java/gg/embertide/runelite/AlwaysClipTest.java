@@ -41,7 +41,9 @@ public class AlwaysClipTest
 	@Test
 	public void eachKindTheyTickedSetsOffAClip()
 	{
-		assertEquals("death", ClipTriggers.of(row("player.death", payload("cause", "npc:1")), ALL).reason);
+		assertEquals("death", ClipTriggers.of(row("player.death", payload("cause", "Vorkath")), ALL).reason);
+		assertEquals("Died to Vorkath", ClipTriggers.of(row("player.death", payload("cause", "Vorkath")), ALL).title);
+		assertEquals("Died", ClipTriggers.of(row("player.death", payload("cause", "unknown")), ALL).title);
 		ClipTriggers.Trigger drop = ClipTriggers.of(row("osrs.loot", payload("source_name", "Vorkath", "total_ge", 2_400_000)), ALL);
 		assertEquals("drop", drop.reason);
 		assertEquals("Vorkath drop, 2.4m gp", drop.title);
@@ -108,14 +110,17 @@ public class AlwaysClipTest
 		ClipBuffer buffer = new ClipBuffer(watched::add);
 		JsonObject header = new JsonObject();
 		header.addProperty("schema", "mccr");
+		header.add("session", payload("title", "Old School RuneScape memory"));
 		buffer.open(header);
 		for (int i = 0; i < 3; i++) { assertTrue(buffer.enqueue(row("osrs.motion", payload("i", i)), false)); }
 		assertEquals(3, watched.size());
 		Captured file = new Captured();
-		JsonObject clip = payload("reason", "death");
+		JsonObject clip = payload("reason", "death", "title", "Died to Vorkath");
 		assertTrue(buffer.keep(file, clip));
 		assertTrue(buffer.kept());
 		assertEquals("death", file.header.getAsJsonObject("clip").get("reason").getAsString());
+		assertEquals("Died to Vorkath", file.header.getAsJsonObject("session").get("title").getAsString());
+		assertEquals("Old School RuneScape memory", header.getAsJsonObject("session").get("title").getAsString());
 		assertFalse(header.has("clip"));
 		assertEquals(3, file.rows.size());
 		assertTrue(buffer.enqueue(row("player.death", payload()), false));

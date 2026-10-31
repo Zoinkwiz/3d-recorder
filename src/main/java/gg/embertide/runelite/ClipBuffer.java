@@ -85,6 +85,11 @@ final class ClipBuffer implements Recorder
 		if (this.file != null || state != State.READY || rows.isEmpty()) { return false; }
 		JsonObject header = rows.get(0).deepCopy();
 		header.add("clip", clip);
+		// The recording's card and Studio read their title from the session: a clip is called what happened.
+		if (clip.has("title") && header.has("session") && header.get("session").isJsonObject())
+		{
+			header.getAsJsonObject("session").add("title", clip.get("title"));
+		}
 		if (file.open(header).isCompletedExceptionally()) { return false; }
 		for (int i = 1; i < rows.size(); i++)
 		{

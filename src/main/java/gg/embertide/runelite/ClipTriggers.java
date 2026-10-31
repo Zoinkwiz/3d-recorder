@@ -55,7 +55,12 @@ final class ClipTriggers
 		switch (type)
 		{
 			case "player.death":
-				return wanted.deaths ? new Trigger("death", "Death") : null;
+			{
+				// The cause is the attacker as the recording names it: an NPC's name, or another player's stand-in.
+				String cause = text(payload, "cause");
+				boolean known = !cause.isEmpty() && !"unknown".equals(cause) && !"damage".equals(cause) && !"someone".equals(cause);
+				return wanted.deaths ? new Trigger("death", known ? "Died to " + cause : "Died") : null;
+			}
 			case "osrs.loot":
 			{
 				long value = number(payload, "total_ge");
