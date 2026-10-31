@@ -4,11 +4,6 @@ import net.runelite.api.Client;
 import net.runelite.api.Constants;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
-import net.runelite.api.GraphicsObject;
-import net.runelite.api.NPC;
-import net.runelite.api.Player;
-import net.runelite.api.Projectile;
-import net.runelite.api.Renderable;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
@@ -18,9 +13,10 @@ import net.runelite.client.callback.RenderCallback;
 import net.runelite.client.callback.RenderCallbackManager;
 
 /**
- * Hides scene submissions, leaving the house and its collision data intact. Works with any renderer that rebuilds
- * zones on invalidateZone and asks RenderCallbackManager about each tile: RuneLite's GPU plugin and 117 HD's default
- * renderer do. Whether this one does is confirmed by it asking about the hidden house, not by its class.
+ * Hides the house's floor and static objects while a replay is placed, leaving its collision data intact. Live
+ * NPCs, players, pets, projectiles and graphics are never hidden. Works with any renderer that rebuilds zones on
+ * invalidateZone and asks RenderCallbackManager about each tile: RuneLite's GPU plugin and 117 HD's default renderer
+ * do. Whether this one does is confirmed by it asking about the hidden house, not by its class.
  */
 final class HouseIsolation implements RenderCallback, AutoCloseable
 {
@@ -34,7 +30,6 @@ final class HouseIsolation implements RenderCallback, AutoCloseable
 	// GPU uploads can run on the map-loader thread. Publish the scene identity,
 	// not a flag that might accidentally hide an incoming non-house scene.
 	private volatile Scene hiddenScene;
-	private volatile Player localPlayer;
 	private volatile boolean confirmed;
 	private DrawCallbacks renderer, failedRenderer;
 	private int frames;
@@ -89,7 +84,6 @@ final class HouseIsolation implements RenderCallback, AutoCloseable
 		renderer = client.getDrawCallbacks();
 		confirmed = false;
 		frames = 0;
-		localPlayer = client.getLocalPlayer();
 		hiddenScene = scene;
 		callbacks.register(this);
 		try
@@ -99,7 +93,6 @@ final class HouseIsolation implements RenderCallback, AutoCloseable
 		catch (RuntimeException e)
 		{
 			hiddenScene = null;
-			localPlayer = null;
 			renderer = null;
 			callbacks.unregister(this);
 			throw e;
@@ -127,30 +120,10 @@ final class HouseIsolation implements RenderCallback, AutoCloseable
 		{
 			return false;
 		}
-		// TileObject's documented hash layout puts entity type in bits 16..18.
-		// Static house objects are type 2. RuneLite projections are temporary
-		// objects; their zero/-1 tags are not map objects. Keep their draw path.
+		// TileObject's documented hash layout puts entity type in bits 16..18. Static house objects are type 2;
+		// anything else on a tile (RuneLite projections, temporary objects) keeps its draw path.
 		int type = (int) (object.getHash() >>> 16 & 7);
-		if (type >= 1 && type <= 4)
-		{
-			return false;
-		}
-		return keepEntity(((GameObject) object).getRenderable());
-	}
-
-	@Override public boolean addEntity(Renderable entity, boolean ui)
-	{
-		return hiddenScene == null || keepEntity(entity);
-	}
-
-	private boolean keepEntity(Renderable entity)
-	{
-		if (entity instanceof Player)
-		{
-			return entity == localPlayer;
-		}
-		// Replay controllers use their own renderable, not live Actor objects.
-		return !(entity instanceof NPC || entity instanceof Projectile || entity instanceof GraphicsObject || entity instanceof Scene);
+		return !(type >= 1 && type <= 4);
 	}
 
 	@Override public void close()
@@ -162,7 +135,6 @@ final class HouseIsolation implements RenderCallback, AutoCloseable
 			return;
 		}
 		hiddenScene = null;
-		localPlayer = null;
 		renderer = null;
 		callbacks.unregister(this);
 		WorldView view = client.getTopLevelWorldView();

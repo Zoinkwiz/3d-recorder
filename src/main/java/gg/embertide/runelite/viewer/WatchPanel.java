@@ -41,7 +41,7 @@ final class WatchPanel extends JPanel
 		speed.setSelectedIndex(2);
 		JCheckBox loop = new JCheckBox("Loop", true), isolate = new JCheckBox("Hide surroundings", true);
 		isolate.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-		isolate.setToolTipText("Hides the house, other players and pets while the replay is placed. House walls still block you. Clear puts them back.");
+		isolate.setToolTipText("Hides your house's floor and objects while the replay is placed, so the replay is clear. House walls still block you. Clear puts them back.");
 		JTextArea hint = text("More options in the plugin's settings.");
 		hint.setForeground(new Color(170, 170, 170));
 		JTextArea more = text("Studio, in your browser, cuts clips, changes the look and makes share links.");

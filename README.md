@@ -80,9 +80,10 @@ under **Watching in your house**.
 
 Only you can see it. The recorded figures and scenery are pictures: they
 can't be clicked, don't block anyone, and your house still decides where you
-can walk. **Hide surroundings** (on by default) hides the house, other
-players and pets while the replay is placed, and puts them back when you
-press **Clear**, leave the house or log out. It works with RuneLite's GPU
+can walk. **Hide surroundings** (on by default) hides your house's floor and
+objects while the replay is placed, so the replay is clear, and puts them back
+when you press **Clear**, leave the house or log out. Other players, pets and
+NPCs stay as they are. It works with RuneLite's GPU
 plugin and 117 HD; with other renderers the panel says so, and you can untick
 it to watch with the house showing.
 
