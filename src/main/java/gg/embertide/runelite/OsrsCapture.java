@@ -63,7 +63,7 @@ import net.runelite.client.util.Text;
 
 public final class OsrsCapture
 {
-	public static final String OSRS_PROFILE = "ec.mccr.osrs/6";
+	public static final String OSRS_PROFILE = "e4d.osrs/7";
 	public static final int MAX_CELLS = 40_000;
 	public static final int MAX_SURFACE_REGIONS = 160;
 	public static final int MAX_SCENE_OBJECTS = 40_000;
@@ -1134,7 +1134,7 @@ public final class OsrsCapture
 		header.addProperty("type", RowTypes.HEADER);
 		header.addProperty("format", MccrSession.FORMAT);
 		header.addProperty("profile", MccrSession.PROFILE);
-		header.addProperty("schema", "MCCR rows + ec.mccr.spatial/1 + " + OSRS_PROFILE);
+		header.addProperty("schema", "MCCR rows + " + MccrSession.PROFILE + " + " + OSRS_PROFILE);
 		header.addProperty("game", MccrSession.GAME);
 		if (account != null)
 		{
