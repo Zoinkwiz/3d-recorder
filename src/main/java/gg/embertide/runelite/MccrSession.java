@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 public final class MccrSession
 {
 	public static final String FORMAT = "mccr/0.1";
-	public static final String PROFILE = "ec.mccr.spatial/1";
+	public static final String PROFILE = "e4d.spatial/1";
 	public static final String SOURCE = "osrs.runelite";
 	/** The plugin version, as build.gradle and runelite-plugin.properties give it. */
 	public static final String VERSION = "0.6.0";
