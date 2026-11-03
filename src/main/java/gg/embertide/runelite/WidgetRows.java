@@ -41,8 +41,9 @@ final class WidgetRows
 	static final String TYPE = "osrs.widgets";
 	static final int PER_ROW = 256, ROWS_PER_TICK = 24, MAX_STATIC = 1500, MAX_DYNAMIC = 2500, MAX_TEXT = 160, MAX_GROUPS = 96;
 
+	private static final int OLD_DISPLAYNAME = 589;
 	private static final Set<Integer> SECRET = Set.of(InterfaceID.BANKPIN_KEYPAD, InterfaceID.BANKPIN_SETTINGS, InterfaceID.WELCOME_SCREEN,
-		InterfaceID.DISPLAYNAME, InterfaceID.TUTORIAL_DISPLAYNAME, InterfaceID.BUGREPORT, InterfaceID.REPORTABUSE);
+		InterfaceID.DISPLAYNAME_MENU, OLD_DISPLAYNAME, InterfaceID.TUTORIAL_DISPLAYNAME, InterfaceID.BUGREPORT, InterfaceID.REPORTABUSE);
 	private static final Set<Integer> OPEN_ONLY = Set.of(InterfaceID.CHATBOX, InterfaceID.PM_CHAT);
 	private static final Set<Integer> NO_TEXT = new HashSet<>(List.of(InterfaceID.FRIENDS, InterfaceID.IGNORE, InterfaceID.CHATCHANNEL_CURRENT,
 		InterfaceID.CHATCHANNEL_SETUP, InterfaceID.SIDE_CHANNELS, InterfaceID.SIDE_CHANNELS_LARGE, InterfaceID.TRADEMAIN, InterfaceID.TRADECONFIRM,
