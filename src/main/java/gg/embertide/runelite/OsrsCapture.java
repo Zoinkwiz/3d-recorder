@@ -54,6 +54,7 @@ import net.runelite.api.Renderable;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarPlayerID;
@@ -61,6 +62,7 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.util.Text;
 
+@Slf4j
 public final class OsrsCapture
 {
 	public static final String OSRS_PROFILE = "e4d.osrs/7";
@@ -194,6 +196,8 @@ public final class OsrsCapture
 	private double[] lastCamera;
 	private int[] lastVitals;
 	private int[] lastAudio;
+	/** What the volume probe last logged (embertide-studio#1043). */
+	private String lastVolumeProbe;
 	/** Per actor, the head icons last written: prayer, skull, then archive and sprite pairs. */
 	private final Map<String, int[]> headIcons = new HashMap<>();
 	private int headIconCount;
@@ -2206,11 +2210,40 @@ public final class OsrsCapture
 		emit("osrs.vitals", t, payload, PLAYER);
 	}
 
+	/**
+	 * A probe for embertide-studio#1043: plugin 0.5.0 and 0.6.0 recorded every volume as 0 on a Mac while the game played
+	 * sound. Logs each place the client may keep its volumes, once at the start and on any change, so moving the
+	 * sliders in game shows which ones follow them. A log line only; nothing is recorded from it.
+	 */
+	private void probeVolumes(Preferences preferences)
+	{
+		String probe = "varp master=" + client.getVarpValue(VarPlayerID.OPTION_MASTER_VOLUME)
+			+ " music=" + client.getVarpValue(VarPlayerID.OPTION_MUSIC)
+			+ " sounds=" + client.getVarpValue(VarPlayerID.OPTION_SOUNDS)
+			+ " area=" + client.getVarpValue(VarPlayerID.OPTION_AREASOUNDS)
+			+ " | desktop varbit master=" + client.getVarbitValue(VarbitID.OPTION_MASTER_VOLUME_DESKTOP)
+			+ " music=" + client.getVarbitValue(VarbitID.OPTION_MUSIC_DESKTOP)
+			+ " sounds=" + client.getVarbitValue(VarbitID.OPTION_SOUNDS_DESKTOP)
+			+ " area=" + client.getVarbitValue(VarbitID.OPTION_AREASOUNDS_DESKTOP)
+			+ " | mobile varbit master=" + client.getVarbitValue(VarbitID.OPTION_MASTER_VOLUME_MOBILE)
+			+ " sounds=" + client.getVarbitValue(VarbitID.OPTION_SOUNDS_MOBILE)
+			+ " | preferences sounds=" + preferences.getSoundEffectVolume()
+			+ " area=" + preferences.getAreaSoundEffectVolume()
+			+ " music=" + client.getMusicVolume();
+		if (probe.equals(lastVolumeProbe))
+		{
+			return;
+		}
+		lastVolumeProbe = probe;
+		log.info("[volume probe] {}", probe);
+	}
+
 	/** The game's volumes, 0 to 100, on change; the client neither plays nor reports a sound its volumes round to silence. */
 	private void audio(double t)
 	{
 		Preferences preferences = client.getPreferences();
 		if (preferences == null) { return; }
+		probeVolumes(preferences);
 		int[] now = {
 			// The slider and mute button set this varp; OPTION_MASTER_VOLUME_DESKTOP is a saved copy the client never reads.
 			client.getVarpValue(VarPlayerID.OPTION_MASTER_VOLUME),
